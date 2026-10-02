@@ -22,7 +22,7 @@ export default function ParentRequestsRoute() {
     queryFn: () => api.requests(familyId, childId),
     enabled: Boolean(familyId && childId),
   });
-  useFamilySync(familyId, childId);
+  useFamilySync(familyId, "parent", childId);
   const decide = useMutation({
     mutationFn: ({ requestId, decision }: { requestId: string; decision: "approve" | "deny" }) => api.decideRequest(familyId, requestId, decision, reason.trim()),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["requests", familyId, childId] }),

@@ -13,6 +13,13 @@ def releaseKeyPassword = releaseValue("GUARDIAN_RELEASE_KEY_PASSWORD")
 def releaseStoreType = releaseValue("GUARDIAN_RELEASE_STORE_TYPE") ?: "JKS"
 def releaseCertificateDigest = releaseValue("GUARDIAN_RELEASE_CERT_SHA256").replace(":", "").toLowerCase()
 def releaseVersionCodeValue = releaseValue("GUARDIAN_RELEASE_VERSION_CODE")
+def guardianRole = (findProperty("guardianRole") ?: "").toString()
+if (guardianRole && !(guardianRole in ["parent", "child"])) {
+    throw new GradleException("guardianRole must be parent or child.")
+}
+if (guardianRole && releaseValue("EXPO_PUBLIC_GUARDIAN_ROLE") != guardianRole) {
+    throw new GradleException("EXPO_PUBLIC_GUARDIAN_ROLE must match guardianRole.")
+}
 
 def releaseAdmissionEnvironment = [
     "EXPO_PUBLIC_API_URL",
@@ -148,11 +155,12 @@ android {
 
     namespace 'com.guardian.family'
     defaultConfig {
-        applicationId 'com.guardian.family'
+        applicationId "com.guardian.family${guardianRole ? ".${guardianRole}" : ""}"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion 36
         versionCode 1
         versionName "1.0.0"
+        resValue "string", "guardian_app_name", guardianRole ? "Guardian ${guardianRole.capitalize()}" : "Guardian"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -233,6 +241,7 @@ tasks.register(taskName, Exec) {
         if (kind == "aab" && (!javaExecutable.isFile() || !keytool.isFile() || !jarsigner.isFile() || !bundletoolClasspath)) throw new GradleException("Bundletool and JDK signing tools are required for AAB policy verification.")
         commandLine "node", new File(projectRoot, "scripts/verify-release-artifact.mjs").absolutePath,
             "--artifact", artifacts.first().absolutePath, "--kind", kind,
+            "--expected-package", "com.guardian.family${guardianRole ? ".${guardianRole}" : ""}",
             "--aapt", aapt.absolutePath, "--apksigner", apksigner.absolutePath,
             "--keytool", keytool.absolutePath, "--jarsigner", jarsigner.absolutePath,
             "--java", javaExecutable.absolutePath, "--bundletool-classpath", bundletoolClasspath

@@ -159,6 +159,18 @@ version code. It then verifies signed APK/AAB artifacts, including their final
 manifests. Backend-only secrets (including JWT and policy private keys) are
 validated by the backend and are never passed to the Android build.
 
+The Android production APK workflow builds two signed, universal APKs from the
+same commit: `Guardian-parent-release.apk` (`com.guardian.family.parent`) and
+`Guardian-child-release.apk` (`com.guardian.family.child`). They can be installed
+on separate devices or side by side. The parent app opens parent sign-in and
+uses the parent real-time API; the child app opens pairing and uses the child
+real-time API after pairing. The production workflow requires the protected
+`guardian-production` environment, a deployed HTTPS API, and the release
+signing configuration above. For a local role build, set
+`EXPO_PUBLIC_GUARDIAN_ROLE=parent` and pass `-PguardianRole=parent` to Gradle
+(use `child` for the child app). The unqualified build retains the original
+single-app role selection and `com.guardian.family` package for development.
+
 ## Emulator harness
 
 Confirm connected devices:

@@ -1,7 +1,7 @@
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import { Text } from "react-native";
 import { PrimaryButton, ScreenScaffold, SecondaryButton, SectionSurface } from "@/design-system";
-import { roleStorage } from "@/state/role";
+import { configuredRole, roleStorage } from "@/state/role";
 
 export default function RoleSelectionRoute() {
   const router = useRouter();
@@ -9,6 +9,7 @@ export default function RoleSelectionRoute() {
     await roleStorage.set(role);
     router.replace(role === "parent" ? "/parent/login" : "/child/pair");
   };
+  if (configuredRole) return <Redirect href={configuredRole === "parent" ? "/parent/login" : "/child/pair"} />;
   return (
     <ScreenScaffold title="Welcome to Guardian">
       <SectionSurface>

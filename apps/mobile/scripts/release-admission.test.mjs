@@ -13,6 +13,7 @@ import {
   verifyArtifactManifestXml,
   fixtureMarkerErrors,
   verifyApkAbis,
+  verifyApkPackage,
 } from "./verify-release-artifact.mjs";
 
 const validPublicKey = Buffer.alloc(32, 7).toString("base64");
@@ -424,6 +425,14 @@ test("release APK policy requires every configured native ABI", () => {
   );
 });
 
+test("release APK policy requires the requested Android role package", () => {
+  const badging = "package: name='com.guardian.family.child' versionCode='42' versionName='1.0.0'";
+  assert.deepEqual(verifyApkPackage(badging, "com.guardian.family.child"), []);
+  assert.deepEqual(verifyApkPackage(badging, "com.guardian.family.parent"), [
+    "Release APK package com.guardian.family.child does not equal com.guardian.family.parent.",
+  ]);
+});
+
 test("signed-release emulator smoke grants KVM access then requires hardware acceleration", async () => {
   const smokeWorkflow = await readFile(
     new URL("../../../.github/workflows/android-release-emulator-smoke.yml", import.meta.url),
@@ -444,13 +453,15 @@ test("the mobile API client has no production placeholder endpoint", async () =>
   assert.match(client, /require an explicitly configured HTTPS API URL/);
 });
 
-test("production APK workflow is manual, protected, universal, and secret-bound", async () => {
+test("production APK workflow builds both protected role-specific universal APKs", async () => {
   const workflow = await readFile(
     new URL("../../../.github/workflows/android-release-apk.yml", import.meta.url),
     "utf8",
   );
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /environment: guardian-production/);
+  assert.match(workflow, /role: \[parent, child\]/);
+  assert.match(workflow, /EXPO_PUBLIC_GUARDIAN_ROLE: \$\{\{ matrix\.role \}\}/);
   assert.match(workflow, /GUARDIAN_RELEASE_REQUIRED_ABIS: "armeabi-v7a,arm64-v8a,x86,x86_64"/);
   for (const secret of [
     "EXPO_PUBLIC_API_URL",
