@@ -246,6 +246,13 @@ class GuardianAccessibilityService : AccessibilityService() {
     enforcement.cancel()
   }
 
+  private fun clearChildEnforcement() {
+    foregroundPackage = null
+    foregroundCategory = null
+    lastContentInspectionAt.clear()
+    stopBudgetTicker()
+  }
+
   private fun packageNameOfGuardian(): String = applicationContext.packageName
 
   companion object {
@@ -265,5 +272,9 @@ class GuardianAccessibilityService : AccessibilityService() {
 
     fun goHomeFromContentBlock(): Boolean =
       instance?.performGlobalAction(GLOBAL_ACTION_HOME) == true
+
+    fun clearChildEnforcement() {
+      instance?.clearChildEnforcement()
+    }
   }
 }

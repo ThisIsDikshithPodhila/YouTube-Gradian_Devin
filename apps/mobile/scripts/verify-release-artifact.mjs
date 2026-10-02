@@ -1,5 +1,5 @@
 import { createHash, X509Certificate } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -16,6 +16,7 @@ const REQUIRED_METADATA = {
   "com.guardian.family.VPN_DECLARATION": undefined,
 };
 const FIXTURE_MARKER = /fixture/i;
+const REQUIRED_NON_RELEASE_FIXTURE_GUARD = "GUARDIAN_NON_RELEASE_FIXTURES_ENABLED";
 
 function applicationTag(xml) { return xml.match(/<application\b[^>]*>/)?.[0] ?? ""; }
 function metadataTag(xml, name) {
@@ -39,9 +40,26 @@ export function verifyArtifactManifestXml(xml, artifactLabel) {
   if (FIXTURE_MARKER.test(xml)) errors.push(`${prefix} must not contain fixture declarations.`);
   return errors;
 }
+function xmlTreeMetadataNodes(tree) {
+  const lines = tree.split("\n");
+  const nodes = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const start = lines[index].match(/^(\s*)E:\s+meta-data\b/);
+    if (!start) continue;
+    let end = index + 1;
+    while (end < lines.length) {
+      if (/^\s*E:/.test(lines[end])) break;
+      end += 1;
+    }
+    nodes.push(lines.slice(index, end).join("\n"));
+  }
+  return nodes;
+}
 
-export function verifyMergedManifest(xml) {
-  return verifyArtifactManifestXml(xml, "merged");
+function xmlTreeNodeHasStringAttribute(node, attribute, value) {
+  return node.split("\n").some((line) =>
+    line.trimStart().startsWith(`A: android:${attribute}(`) && line.includes(`"${value}"`),
+  );
 }
 
 export function verifyArtifactManifestTree(tree) {
@@ -50,7 +68,18 @@ export function verifyArtifactManifestTree(tree) {
     const line = tree.split("\n").find((candidate) => candidate.includes(`android:${attribute}(`));
     if (!line || !/(?:\bfalse\b|0x0+\b)/.test(line) || /0xffffffff/.test(line)) errors.push(`Release APK manifest tree must set android:${attribute}=false.`);
   }
-  for (const required of ["isMonitoringTool", "child_monitoring", ...REQUIRED_SERVICES]) if (!tree.includes(required)) errors.push(`Release APK manifest tree is missing ${required}.`);
+  const metadataNodes = xmlTreeMetadataNodes(tree);
+  const monitoringMetadata = metadataNodes.some((node) =>
+    xmlTreeNodeHasStringAttribute(node, "name", "isMonitoringTool")
+      && xmlTreeNodeHasStringAttribute(node, "value", "child_monitoring"),
+  );
+  if (!monitoringMetadata) errors.push("Release APK manifest tree must declare isMonitoringTool=child_monitoring.");
+  for (const required of Object.keys(REQUIRED_METADATA).filter((name) => name !== "isMonitoringTool")) {
+    if (!metadataNodes.some((node) => xmlTreeNodeHasStringAttribute(node, "name", required))) {
+      errors.push(`Release APK manifest tree is missing metadata ${required}.`);
+    }
+  }
+  for (const service of REQUIRED_SERVICES) if (!tree.includes(service)) errors.push(`Release APK manifest tree is missing ${service}.`);
   for (const permission of PROHIBITED_PERMISSIONS) if (tree.includes(`android.permission.${permission}`)) errors.push(`Release APK manifest tree contains prohibited permission ${permission}.`);
   if (FIXTURE_MARKER.test(tree)) errors.push("Release APK manifest tree contains fixture content.");
   return errors;
@@ -59,12 +88,35 @@ export function verifyArtifactManifestTree(tree) {
 export function fixtureMarkerErrors(entries, contents) {
   const errors = [];
   for (const entry of entries) if (FIXTURE_MARKER.test(entry)) errors.push(`Release archive contains fixture entry ${entry}.`);
-  for (const content of contents) if (FIXTURE_MARKER.test(Buffer.from(content).toString("utf8"))) errors.push("Release archive contains fixture bytes.");
+  for (const content of contents) {
+    const inspected = Buffer.from(content)
+      .toString("utf8")
+      .replaceAll(REQUIRED_NON_RELEASE_FIXTURE_GUARD, "");
+    if (FIXTURE_MARKER.test(inspected)) errors.push("Release archive contains fixture bytes.");
+  }
   return errors;
 }
 
 function output(command, args) { return execFileSync(command, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }); }
 function archiveEntries(artifact) { return output("unzip", ["-Z1", artifact]).split("\n").filter(Boolean); }
+const DEFAULT_REQUIRED_APK_ABIS = ["armeabi-v7a", "arm64-v8a", "x86", "x86_64"];
+function requiredApkAbis() {
+  const configured = (process.env.GUARDIAN_RELEASE_REQUIRED_ABIS ?? "")
+    .split(",")
+    .map((abi) => abi.trim())
+    .filter(Boolean);
+  return configured.length ? configured : DEFAULT_REQUIRED_APK_ABIS;
+}
+export function verifyApkAbis(entries, required = requiredApkAbis()) {
+  const present = new Set(
+    entries
+      .map((entry) => entry.match(/^lib\/([^/]+)\//)?.[1])
+      .filter(Boolean),
+  );
+  return required
+    .filter((abi) => !present.has(abi))
+    .map((abi) => `Release APK is missing native libraries for ABI ${abi}.`);
+}
 function archiveFixtureErrors(artifact) {
   const entries = archiveEntries(artifact);
   const inspected = entries.filter((entry) => /(^|\/)(assets\/|.*\.dex$|.*\.(?:jsbundle|bundle|json)$)/i.test(entry));
@@ -114,17 +166,16 @@ function requiredFile(path, label) { if (!path || !existsSync(path) || !statSync
 function requiredValue(value, label) { if (!value) throw new Error(`${label} is required.`); return value; }
 
 function main() {
-  const mergedManifest = requiredFile(argument("--merged-manifest"), "Merged release manifest");
   const artifact = requiredFile(argument("--artifact"), "Release artifact");
   const kind = argument("--kind");
   const expectedVersion = process.env.GUARDIAN_RELEASE_VERSION_CODE;
   if (!/^[1-9]\d*$/.test(expectedVersion ?? "")) throw new Error("GUARDIAN_RELEASE_VERSION_CODE is required for final artifact verification.");
   if (statSync(artifact).size === 0) throw new Error(`Release ${kind} is empty.`);
-  const errors = [...verifyMergedManifest(readFileSync(mergedManifest, "utf8")), ...archiveFixtureErrors(artifact)];
+  const errors = [...archiveFixtureErrors(artifact)];
   if (kind === "apk") {
     const aapt = requiredFile(argument("--aapt"), "Android aapt");
     const apksigner = requiredFile(argument("--apksigner"), "Android apksigner");
-    errors.push(...verifyArtifactManifestTree(output(aapt, ["dump", "xmltree", artifact, "AndroidManifest.xml"])), ...verifyApkCertificate(artifact, apksigner), ...verifyApkVersion(artifact, aapt, expectedVersion));
+    errors.push(...verifyArtifactManifestTree(output(aapt, ["dump", "xmltree", artifact, "AndroidManifest.xml"])), ...verifyApkCertificate(artifact, apksigner), ...verifyApkVersion(artifact, aapt, expectedVersion), ...verifyApkAbis(archiveEntries(artifact)));
   } else if (kind === "aab") {
     const keytool = requiredFile(argument("--keytool"), "keytool");
     const jarsigner = requiredFile(argument("--jarsigner"), "jarsigner");

@@ -1,5 +1,5 @@
 # ruff: noqa: E501
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from ..api.handler_support import (
     UTC,
@@ -73,6 +73,7 @@ async def read_family(
 
 async def family_health(
     family_id: UUID,
+    child_id: UUID | None = Query(None),
     parent: Parent = Depends(current_parent),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, object]]:
@@ -82,7 +83,10 @@ async def family_health(
             await session.scalars(
                 select(Device)
                 .join(ChildProfile, ChildProfile.id == Device.child_profile_id)
-                .where(ChildProfile.family_id == family_id)
+                .where(
+                    ChildProfile.family_id == family_id,
+                    *([ChildProfile.id == child_id] if child_id is not None else []),
+                )
             )
         ).all()
     )

@@ -18,4 +18,8 @@ class EncryptedReputationStore(
       .putLong("version", version)
       .commit()
   }
+
+  override fun clear() {
+    preferences.edit().clear().commit()
+  }
 }

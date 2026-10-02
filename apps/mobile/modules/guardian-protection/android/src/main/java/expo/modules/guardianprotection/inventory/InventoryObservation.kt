@@ -21,7 +21,7 @@ internal object InventoryCoverage {
 
   fun detail(sources: Set<InventorySource>): String = when {
     sources.isEmpty() -> "No app source is currently available; inventory is incomplete."
-    else -> "Partial inventory from ${sourceLabels(sources).joinToString(", ")}. " +
+    else -> "Partial, incomplete inventory from ${sourceLabels(sources).joinToString(", ")}. " +
       "Android may hide non-launcher packages and unavailable/revoked signals."
   }
 }

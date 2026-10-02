@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
@@ -28,16 +29,17 @@ async def test_account_deletion_removes_family_and_child_data(
     auth = {"Authorization": f"Bearer {parent_a.token}"}
     device_auth = {"Authorization": f"Bearer {paired_device.device_token}"}
 
+    heartbeat_body = json.dumps(
+        {"protection_state": "HEALTHY", "capabilities": {}}, separators=(",", ":")
+    ).encode()
     heartbeat = await client.post(
         "/v1/devices/me/heartbeat",
-        headers=device_auth,
-        json={"protection_state": "HEALTHY", "capabilities": {}},
+        headers=paired_device.signed_headers("/v1/devices/me/heartbeat", heartbeat_body),
+        content=heartbeat_body,
     )
     assert heartbeat.status_code == 204, heartbeat.text
-    inventory = await client.post(
-        "/v1/devices/me/inventory",
-        headers=device_auth,
-        json={
+    inventory_body = json.dumps(
+        {
             "apps": [
                 {
                     "platform_app_id": "com.example.chat",
@@ -47,6 +49,12 @@ async def test_account_deletion_removes_family_and_child_data(
                 }
             ]
         },
+        separators=(",", ":"),
+    ).encode()
+    inventory = await client.post(
+        "/v1/devices/me/inventory",
+        headers=paired_device.signed_headers("/v1/devices/me/inventory", inventory_body),
+        content=inventory_body,
     )
     assert inventory.status_code == 202, inventory.text
     push = await client.post(
@@ -55,10 +63,8 @@ async def test_account_deletion_removes_family_and_child_data(
         json={"token": "test-device-token-" + "x" * 20, "platform": "ANDROID"},
     )
     assert push.status_code == 204, push.text
-    events = await client.post(
-        "/v1/devices/me/events",
-        headers=device_auth,
-        json={
+    events_body = json.dumps(
+        {
             "events": [
                 {
                     "event_type": "APP_USAGE",
@@ -82,6 +88,12 @@ async def test_account_deletion_removes_family_and_child_data(
                 },
             ]
         },
+        separators=(",", ":"),
+    ).encode()
+    events = await client.post(
+        "/v1/devices/me/events",
+        headers=paired_device.signed_headers("/v1/devices/me/events", events_body),
+        content=events_body,
     )
     assert events.status_code == 202, events.text
     request_body = b'{"request_type":"MORE_TIME","subject":"Chat","reason":"Need more time"}'

@@ -1,5 +1,5 @@
 # ruff: noqa: E501
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from ..api.handler_support import (
     UTC,
@@ -42,6 +42,7 @@ router = APIRouter()
 
 async def list_requests(
     family_id: UUID,
+    child_id: UUID | None = Query(None),
     parent: Parent = Depends(current_parent),
     session: AsyncSession = Depends(get_session),
 ) -> list[RequestRow]:
@@ -49,7 +50,10 @@ async def list_requests(
     rows = await session.scalars(
         select(RequestRow)
         .join(ChildProfile, ChildProfile.id == RequestRow.child_profile_id)
-        .where(ChildProfile.family_id == family_id)
+        .where(
+            ChildProfile.family_id == family_id,
+            *([ChildProfile.id == child_id] if child_id is not None else []),
+        )
         .order_by(RequestRow.created_at.desc())
     )
     return list(rows.all())

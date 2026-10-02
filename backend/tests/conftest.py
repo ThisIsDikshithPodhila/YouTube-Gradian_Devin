@@ -42,6 +42,7 @@ class PairedDevice:
         ).decode("ascii")
         return {
             "Authorization": f"Bearer {self.device_token}",
+            "Content-Type": "application/json",
             "X-Guardian-Device-Timestamp": timestamp,
             "X-Guardian-Device-Nonce": nonce,
             "X-Guardian-Device-Signature": signature,

@@ -12,7 +12,7 @@ import {
   verifyArtifactManifestTree,
   verifyArtifactManifestXml,
   fixtureMarkerErrors,
-  verifyMergedManifest,
+  verifyApkAbis,
 } from "./verify-release-artifact.mjs";
 
 const validPublicKey = Buffer.alloc(32, 7).toString("base64");
@@ -188,6 +188,8 @@ test("Android release sources declare SDK 36, no debug signing, and fail-closed 
   assert.match(buildFile, /verifyGuardianReleaseAdmission/);
   assert.match(buildFile, /verifyGuardianReleaseApkArtifact/);
   assert.match(buildFile, /verifyGuardianReleaseAabArtifact/);
+  assert.match(buildFile, /"--artifact", artifacts\.first\(\)\.absolutePath, "--kind", kind/);
+  assert.doesNotMatch(buildFile, /merged_manifest|merged_manifests|--merged-manifest/);
   assert.match(buildFile, /com\.android\.tools\.build:bundletool:1\.18\.1/);
   assert.doesNotMatch(buildFile, /apkanalyzer/);
   assert.match(buildFile, /GUARDIAN_RELEASE_VERSION_CODE/);
@@ -219,6 +221,11 @@ test("Android release sources declare SDK 36, no debug signing, and fail-closed 
     /GUARDIAN_(?:JWT_SECRET|POLICY_PRIVATE_KEY|ENVIRONMENT)/,
   );
   assert.match(moduleBuildFile, /GUARDIAN_NON_RELEASE_FIXTURES_ENABLED/);
+  assert.match(moduleBuildFile, /System\.getenv\("GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS"\)/);
+  assert.match(moduleBuildFile, /System\.getenv\("GUARDIAN_POLICY_KEY_ID"\)/);
+  assert.match(moduleBuildFile, /System\.getenv\("GUARDIAN_DOH_URL"\)/);
+  assert.match(moduleBuildFile, /GUARDIAN_POLICY_KEY_ID/);
+  assert.doesNotMatch(moduleBuildFile, /project\.findProperty/);
 });
 
 test("release manifest is private by default and declares transparent monitoring only", async () => {
@@ -296,28 +303,64 @@ test("debug cleartext override is narrowly limited while release stays disabled"
   );
 });
 
-test("merged-manifest policy verifier rejects prohibited release policy", () => {
+test("effective artifact manifest policy rejects prohibited release policy", () => {
   const invalidManifest = `
     <manifest xmlns:android="http://schemas.android.com/apk/res/android">
       <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
       <application android:allowBackup="true" android:usesCleartextTraffic="true" />
     </manifest>`;
-  const errors = verifyMergedManifest(invalidManifest);
+  const errors = verifyArtifactManifestXml(invalidManifest, "artifact");
   assert.ok(errors.some((error) => error.includes("allowBackup")));
   assert.ok(errors.some((error) => error.includes("Cleartext")));
   assert.ok(errors.some((error) => error.includes("ACCESS_FINE_LOCATION")));
   assert.ok(errors.some((error) => error.includes("isMonitoringTool")));
 });
 
-test("APK manifest-tree policy verifier requires false backup and cleartext values", () => {
+test("APK manifest-tree policy verifier rejects changed shipping declarations", () => {
   const tree = `
     E: manifest
+      E: uses-permission
+        A: android:name(0x01010003)="android.permission.RECORD_AUDIO"
       E: application
         A: android:allowBackup(0x01010080)=(type 0x12)0xffffffff
-        A: android:usesCleartextTraffic(0x010104ec)=(type 0x12)0xffffffff`;
+        A: android:usesCleartextTraffic(0x010104ec)=(type 0x12)0xffffffff
+        A: android:name(0x01010003)="fixture release marker"`;
   const errors = verifyArtifactManifestTree(tree);
   assert.ok(errors.some((error) => error.includes("allowBackup")));
   assert.ok(errors.some((error) => error.includes("usesCleartextTraffic")));
+  assert.ok(errors.some((error) => error.includes("RECORD_AUDIO")));
+  assert.ok(errors.some((error) => error.includes("isMonitoringTool")));
+  assert.ok(errors.some((error) => error.includes("CHILD_MONITORING_DISCLOSURE")));
+  assert.ok(errors.some((error) => error.includes("GuardianVpnService")));
+  assert.ok(errors.some((error) => error.includes("fixture")));
+});
+
+test("APK manifest-tree policy binds monitoring values to their metadata nodes", () => {
+  const tree = `
+    E: manifest
+      E: application
+        A: android:label(0x01010001)="com.guardian.family.CHILD_MONITORING_DISCLOSURE"
+        E: meta-data
+          A: android:name(0x01010003)="isMonitoringTool"
+          A: android:value(0x01010024)="not_child_monitoring"
+        E: meta-data
+          A: android:name(0x01010003)="unrelated"
+          A: android:value(0x01010024)="child_monitoring"`;
+  const errors = verifyArtifactManifestTree(tree);
+  assert.ok(errors.some((error) => error.includes("isMonitoringTool=child_monitoring")));
+  assert.ok(errors.some((error) => error.includes("CHILD_MONITORING_DISCLOSURE")));
+});
+
+test("APK manifest-tree policy rejects malformed nested metadata cross-association", () => {
+  const tree = `
+    E: manifest
+      E: application
+        E: meta-data
+          A: android:name(0x01010003)="isMonitoringTool"
+          E: meta-data
+            A: android:value(0x01010024)="child_monitoring"`;
+  const errors = verifyArtifactManifestTree(tree);
+  assert.ok(errors.some((error) => error.includes("isMonitoringTool=child_monitoring")));
 });
 
 test("AAB effective-manifest policy verifier rejects changed release declarations", () => {
@@ -351,10 +394,45 @@ test("AAB manifest inspection uses bundletool's supported base-module command", 
   );
 });
 
-test("artifact archive policy rejects fixture names and fixture bytes", () => {
+test("artifact archive policy rejects fixtures but permits its required fail-closed guard symbol", () => {
   assert.ok(fixtureMarkerErrors(["assets/fixture-policy.json"], []).length > 0);
   assert.ok(fixtureMarkerErrors(["classes.dex"], [Buffer.from("fixture payload")]).length > 0);
+  assert.deepEqual(
+    fixtureMarkerErrors(["classes.dex"], [Buffer.from("GUARDIAN_NON_RELEASE_FIXTURES_ENABLED")]),
+    [],
+  );
+  assert.ok(
+    fixtureMarkerErrors(
+      ["classes.dex"],
+      [Buffer.from("GUARDIAN_NON_RELEASE_FIXTURES_ENABLED real fixture payload")],
+    ).length > 0,
+  );
   assert.deepEqual(fixtureMarkerErrors(["assets/policy.json"], [Buffer.from("production payload")]), []);
+});
+
+test("release APK policy requires every configured native ABI", () => {
+  const entries = [
+    "lib/armeabi-v7a/libguardian.so",
+    "lib/arm64-v8a/libguardian.so",
+    "lib/x86/libguardian.so",
+    "lib/x86_64/libguardian.so",
+  ];
+  assert.deepEqual(verifyApkAbis(entries), []);
+  assert.deepEqual(
+    verifyApkAbis(entries.filter((entry) => !entry.startsWith("lib/x86/"))),
+    ["Release APK is missing native libraries for ABI x86."],
+  );
+});
+
+test("signed-release emulator smoke grants KVM access then requires hardware acceleration", async () => {
+  const smokeWorkflow = await readFile(
+    new URL("../../../.github/workflows/android-release-emulator-smoke.yml", import.meta.url),
+    "utf8",
+  );
+  assert.match(smokeWorkflow, /sudo chmod 666 \/dev\/kvm \|\| true/);
+  assert.match(smokeWorkflow, /emulator-acceleration\.txt/);
+  assert.match(smokeWorkflow, /must be an existing readable\/writable device/);
+  assert.doesNotMatch(smokeWorkflow, /-accel off/);
 });
 
 test("the mobile API client has no production placeholder endpoint", async () => {
@@ -364,4 +442,29 @@ test("the mobile API client has no production placeholder endpoint", async () =>
   );
   assert.doesNotMatch(client, /api\.guardian\.example/);
   assert.match(client, /require an explicitly configured HTTPS API URL/);
+});
+
+test("production APK workflow is manual, protected, universal, and secret-bound", async () => {
+  const workflow = await readFile(
+    new URL("../../../.github/workflows/android-release-apk.yml", import.meta.url),
+    "utf8",
+  );
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /environment: guardian-production/);
+  assert.match(workflow, /GUARDIAN_RELEASE_REQUIRED_ABIS: "armeabi-v7a,arm64-v8a,x86,x86_64"/);
+  for (const secret of [
+    "EXPO_PUBLIC_API_URL",
+    "GUARDIAN_DOH_URL",
+    "GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS",
+    "GUARDIAN_POLICY_KEY_ID",
+    "GUARDIAN_RELEASE_KEYSTORE_BASE64",
+    "GUARDIAN_RELEASE_STORE_PASSWORD",
+    "GUARDIAN_RELEASE_KEY_ALIAS",
+    "GUARDIAN_RELEASE_KEY_PASSWORD",
+    "GUARDIAN_RELEASE_CERT_SHA256",
+  ]) {
+    assert.match(workflow, new RegExp(`secrets\\.${secret}`));
+  }
+  assert.doesNotMatch(workflow, /GUARDIAN_(?:JWT_SECRET|POLICY_PRIVATE_KEY)/);
+  assert.match(workflow, /actions\/upload-artifact@[0-9a-f]{40}/);
 });

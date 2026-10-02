@@ -1,0 +1,588 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Guardian consumer-MVP API: API Gateway HTTPS, VPC Link, internal ALB, one
+  EC2 API worker, and encrypted private RDS PostgreSQL. No managed-device controls.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Existing dedicated/default VPC. No existing workload is modified.
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Existing public subnet for outbound-only API instance access through SSM.
+  PrivateSubnetACidr:
+    Type: String
+    Default: 172.31.48.0/20
+  PrivateSubnetBCidr:
+    Type: String
+    Default: 172.31.64.0/20
+  AvailabilityZoneA:
+    Type: AWS::EC2::AvailabilityZone::Name
+  AvailabilityZoneB:
+    Type: AWS::EC2::AvailabilityZone::Name
+  SourceRepository:
+    Type: String
+    Default: https://github.com/ThisIsDikshithPodhila/YouTube-Gradian_Devin.git
+  SourceBranch:
+    Type: String
+    Description: Release branch used only to fetch the pinned source revision.
+  SourceRevision:
+    Type: String
+    Description: Immutable Git commit SHA to build and run.
+  BackendConfigSecretArn:
+    Type: String
+    Description: Secrets Manager ARN with the Guardian production config JSON.
+  DatabaseMasterPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    MaxLength: 128
+  OriginSharedSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    MaxLength: 128
+  ApiInstanceType:
+    Type: String
+    Default: t3.small
+  DatabaseInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+  DatabaseEngineVersion:
+    Type: String
+    Default: '16.15'
+
+Resources:
+  GuardianPrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcId
+      AvailabilityZone: !Ref AvailabilityZoneA
+      CidrBlock: !Ref PrivateSubnetACidr
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: guardian-production-private-a
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+
+  GuardianPrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcId
+      AvailabilityZone: !Ref AvailabilityZoneB
+      CidrBlock: !Ref PrivateSubnetBCidr
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: guardian-production-private-b
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+
+  GuardianPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: guardian-production-private
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+
+  GuardianPrivateRouteAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref GuardianPrivateRouteTable
+      SubnetId: !Ref GuardianPrivateSubnetA
+
+  GuardianPrivateRouteAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref GuardianPrivateRouteTable
+      SubnetId: !Ref GuardianPrivateSubnetB
+
+  ApiLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Guardian internal ALB. Ingress is granted only to the API Gateway VPC Link.
+      VpcId: !Ref VpcId
+      SecurityGroupEgress: []
+      Tags:
+        - Key: Name
+          Value: guardian-production-alb
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+
+  ApiGatewayVpcLinkSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Guardian API Gateway VPC Link can reach only the internal ALB.
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          DestinationSecurityGroupId: !Ref ApiLoadBalancerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: guardian-production-api-gateway-vpc-link
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+
+  ApiLoadBalancerIngressFromApiGateway:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ApiLoadBalancerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !Ref ApiGatewayVpcLinkSecurityGroup
+
+  ApiInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Guardian API instance; no public ingress and ALB-only API ingress.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref ApiLoadBalancerSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: guardian-production-api
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+
+  ApiReleaseRevisionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub 'Guardian API release ${SourceRevision}'
+      VpcId: !Ref VpcId
+      SecurityGroupEgress: []
+      Tags:
+        - Key: Name
+          Value: !Sub 'guardian-production-api-release-${SourceRevision}'
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+
+  ApiLoadBalancerEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ApiLoadBalancerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8000
+      ToPort: 8000
+      DestinationSecurityGroupId: !Ref ApiInstanceSecurityGroup
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Guardian PostgreSQL accepts only the Guardian API worker.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ApiInstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: guardian-production-postgres
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+
+  GuardianDbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Guardian production isolated PostgreSQL subnets.
+      SubnetIds:
+        - !Ref GuardianPrivateSubnetA
+        - !Ref GuardianPrivateSubnetB
+      Tags:
+        - Key: Name
+          Value: guardian-production-db-subnets
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+
+  GuardianDatabase:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      AllocatedStorage: '20'
+      AutoMinorVersionUpgrade: true
+      BackupRetentionPeriod: 7
+      CopyTagsToSnapshot: true
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      DBInstanceIdentifier: guardian-production-postgres
+      DBName: guardian
+      DBSubnetGroupName: !Ref GuardianDbSubnetGroup
+      DeletionProtection: true
+      EnableCloudwatchLogsExports:
+        - postgresql
+      Engine: postgres
+      EngineVersion: !Ref DatabaseEngineVersion
+      MasterUsername: guardian
+      MasterUserPassword: !Ref DatabaseMasterPassword
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageEncrypted: true
+      StorageType: gp3
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      Tags:
+        - Key: Name
+          Value: guardian-production-postgres
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: /guardian/production/api
+      RetentionInDays: 30
+
+  ApiInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: guardian-production-api-instance
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: guardian-production-runtime
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref BackendConfigSecretArn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+                Resource: !Sub '${ApiLogGroup.Arn}:*'
+      Tags:
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+
+  ApiInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: guardian-production-api-instance
+      Roles:
+        - !Ref ApiInstanceRole
+
+  ApiInstance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - GuardianDatabase
+    Properties:
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      InstanceType: !Ref ApiInstanceType
+      IamInstanceProfile: !Ref ApiInstanceProfile
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref ApiInstanceSecurityGroup
+            - !Ref ApiReleaseRevisionSecurityGroup
+          SubnetId: !Ref PublicSubnetId
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: 20
+            VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: guardian-production-api-01
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          export AWS_DEFAULT_REGION='${AWS::Region}'
+          dnf install -y docker git jq
+          systemctl enable --now docker
+          install -d -m 0700 /opt/guardian
+          config_json="$(aws secretsmanager get-secret-value --secret-id '${BackendConfigSecretArn}' --query SecretString --output text)"
+          db_password="$(printf '%s' "$config_json" | jq -r '.database_password')"
+          jwt_secret="$(printf '%s' "$config_json" | jq -r '.jwt_secret')"
+          policy_private_key="$(printf '%s' "$config_json" | jq -r '.policy_private_key')"
+          policy_public_key="$(printf '%s' "$config_json" | jq -r '.policy_public_key')"
+          policy_key_id="$(printf '%s' "$config_json" | jq -r '.policy_key_id')"
+          test -n "$db_password" -a "$db_password" != null
+          test -n "$jwt_secret" -a "$jwt_secret" != null
+          test -n "$policy_private_key" -a "$policy_private_key" != null
+          test -n "$policy_public_key" -a "$policy_public_key" != null
+          test -n "$policy_key_id" -a "$policy_key_id" != null
+          trusted_policy_keys="$(jq -cn --arg id "$policy_key_id" --arg key "$policy_public_key" '{($id):$key}')"
+          umask 077
+          printf '%s\n' \
+            'GUARDIAN_ENVIRONMENT=production' \
+            "GUARDIAN_DATABASE_URL=postgresql+asyncpg://guardian:$db_password@${GuardianDatabase.Endpoint.Address}:5432/guardian?ssl=require" \
+            "GUARDIAN_JWT_SECRET=$jwt_secret" \
+            "GUARDIAN_POLICY_PRIVATE_KEY=$policy_private_key" \
+            "GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS=$trusted_policy_keys" \
+            "GUARDIAN_POLICY_KEY_ID=$policy_key_id" \
+            'GUARDIAN_UVICORN_WORKERS=1' > /opt/guardian/api.env
+          chmod 0600 /opt/guardian/api.env
+          rm -rf /opt/guardian/source
+          git clone --filter=blob:none --no-checkout --branch '${SourceBranch}' '${SourceRepository}' /opt/guardian/source
+          cd /opt/guardian/source
+          git checkout --detach '${SourceRevision}'
+          docker build --pull -f backend/Dockerfile -t guardian-api:production .
+          docker rm -f guardian-api >/dev/null 2>&1 || true
+          docker run -d --name guardian-api --restart unless-stopped \
+            --env-file /opt/guardian/api.env \
+            --log-driver awslogs \
+            --log-opt awslogs-region='${AWS::Region}' \
+            --log-opt awslogs-group='/guardian/production/api' \
+            --log-opt awslogs-stream='api-01' \
+            -p 8000:8000 guardian-api:production
+
+  ApiTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 15
+      HealthCheckPath: /readiness
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Name: guardian-production-api
+      Port: 8000
+      Protocol: HTTP
+      TargetType: instance
+      Targets:
+        - Id: !Ref ApiInstance
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+
+  ApiLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: guardian-production-api
+      Scheme: internal
+      SecurityGroups:
+        - !Ref ApiLoadBalancerSecurityGroup
+      Subnets:
+        - !Ref GuardianPrivateSubnetA
+        - !Ref GuardianPrivateSubnetB
+      Type: application
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '120'
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: 'true'
+      Tags:
+        - Key: Project
+          Value: guardian
+        - Key: Environment
+          Value: production
+
+  ApiLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            ContentType: text/plain
+            MessageBody: Access denied
+            StatusCode: '403'
+      LoadBalancerArn: !Ref ApiLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  ApiGatewayHeaderRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ApiTargetGroup
+      Conditions:
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName: X-Guardian-Origin-Verify
+            Values:
+              # HTTP API parameter mapping requires static values to be
+              # single-quoted. ALB compares the delivered header value, which
+              # includes those delimiters in the VPC-link request contract.
+              - !Sub "'${OriginSharedSecret}'"
+      ListenerArn: !Ref ApiLoadBalancerListener
+      Priority: 1
+
+  GuardianApiGatewayVpcLink:
+    Type: AWS::ApiGatewayV2::VpcLink
+    Properties:
+      Name: guardian-production-api-vpc-link
+      SubnetIds:
+        - !Ref GuardianPrivateSubnetA
+        - !Ref GuardianPrivateSubnetB
+      SecurityGroupIds:
+        - !Ref ApiGatewayVpcLinkSecurityGroup
+      Tags:
+        Project: guardian
+        Environment: production
+
+  GuardianHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: guardian-production-api
+      Description: Guardian consumer MVP public API. API Gateway is the sole public entry point.
+      ProtocolType: HTTP
+      Tags:
+        Project: guardian
+        Environment: production
+
+  GuardianHttpIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    DependsOn:
+      - ApiLoadBalancerListener
+      - GuardianApiGatewayVpcLink
+      - ApiLoadBalancerIngressFromApiGateway
+      - ApiGatewayHeaderRule
+    Properties:
+      ApiId: !Ref GuardianHttpApi
+      ConnectionId: !Ref GuardianApiGatewayVpcLink
+      ConnectionType: VPC_LINK
+      IntegrationMethod: ANY
+      IntegrationType: HTTP_PROXY
+      IntegrationUri: !Ref ApiLoadBalancerListener
+      PayloadFormatVersion: '1.0'
+      RequestParameters:
+        'overwrite:header.X-Guardian-Origin-Verify': !Sub "'${OriginSharedSecret}'"
+      TimeoutInMillis: 30000
+
+  GuardianHttpDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref GuardianHttpApi
+      AuthorizationType: NONE
+      RouteKey: '$default'
+      Target: !Join
+        - /
+        - - integrations
+          - !Ref GuardianHttpIntegration
+
+  ApiGatewayAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /guardian/production/api-gateway
+      RetentionInDays: 30
+
+  GuardianHttpDefaultStageAccessLogs:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref GuardianHttpApi
+      AutoDeploy: true
+      StageName: '$default'
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiGatewayAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","routeKey":"$context.routeKey","status":"$context.status","responseLatency":"$context.responseLatency"}
+      Tags:
+        Project: guardian
+        Environment: production
+
+  ApiTarget5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Guardian API target returned five or more 5xx responses in five minutes. No subscriber is configured yet.
+      AlarmName: guardian-production-api-target-5xx
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      MetricName: HTTPCode_Target_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Period: 300
+      Statistic: Sum
+      Threshold: 5
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt ApiLoadBalancer.LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !GetAtt ApiTargetGroup.TargetGroupFullName
+
+  DatabaseFreeStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Guardian database has less than 5 GiB free. No subscriber is configured yet.
+      AlarmName: guardian-production-db-low-storage
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref GuardianDatabase
+      EvaluationPeriods: 1
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      Period: 300
+      Statistic: Average
+      Threshold: 5368709120
+      TreatMissingData: notBreaching
+
+Outputs:
+  ApiBaseUrl:
+    Description: API Gateway-managed public TLS endpoint to configure in the Android release APK.
+    Value: !GetAtt GuardianHttpApi.ApiEndpoint
+  ApiGatewayHttpApiId:
+    Value: !Ref GuardianHttpApi
+  ApiGatewayVpcLinkId:
+    Value: !Ref GuardianApiGatewayVpcLink
+  ApiLoadBalancerSecurityGroupId:
+    Value: !Ref ApiLoadBalancerSecurityGroup
+  ApiInstanceId:
+    Value: !Ref ApiInstance
+  DatabaseEndpoint:
+    Value: !GetAtt GuardianDatabase.Endpoint.Address
+  DatabaseInstanceIdentifier:
+    Value: !Ref GuardianDatabase
+  ApiLogGroupName:
+    Value: !Ref ApiLogGroup

@@ -12,7 +12,7 @@ export type QueuedAccessRequest = {
   error?: string;
 };
 
-type Storage = Pick<typeof SecureStore, "getItemAsync" | "setItemAsync"> | Map<string, string>;
+type Storage = Pick<typeof SecureStore, "getItemAsync" | "setItemAsync" | "deleteItemAsync"> | Map<string, string>;
 const flushes = new WeakMap<object, Promise<QueuedAccessRequest[]>>();
 
 async function get(storage: Storage): Promise<string | null> {
@@ -26,6 +26,14 @@ async function set(storage: Storage, value: string): Promise<void> {
     storage.set(OUTBOX_KEY, value);
   } else {
     await storage.setItemAsync(OUTBOX_KEY, value);
+  }
+}
+
+export async function clearRequestOutbox(storage: Storage = SecureStore): Promise<void> {
+  if (storage instanceof Map) {
+    storage.delete(OUTBOX_KEY);
+  } else {
+    await storage.deleteItemAsync(OUTBOX_KEY);
   }
 }
 

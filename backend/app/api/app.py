@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from uuid import uuid4
 
@@ -27,6 +28,15 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+def _safe_log_path(path: str) -> str:
+    """Remove bearer-like action tokens before writing a request path to logs."""
+    return re.sub(
+        r"(/v1/push/actions/)[^/]+/(approve|deny)$",
+        r"\1[redacted]/\2",
+        path,
+    )
+
+
 @app.middleware("http")
 async def request_id_middleware(
     request: Request,
@@ -42,7 +52,7 @@ async def request_id_middleware(
                 "event": "http_request",
                 "request_id": request_id,
                 "method": request.method,
-                "path": request.url.path,
+                "path": _safe_log_path(request.url.path),
                 "status_code": response.status_code,
                 "response_request_id": response.headers.get("X-Request-ID"),
             },
@@ -51,7 +61,7 @@ async def request_id_middleware(
         extra={
             "request_id": request_id,
             "method": request.method,
-            "path": request.url.path,
+            "path": _safe_log_path(request.url.path),
             "status_code": response.status_code,
         },
     )

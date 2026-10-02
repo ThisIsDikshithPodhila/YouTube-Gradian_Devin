@@ -128,9 +128,9 @@ function setLoadedQueries() {
   setQuery(["children", "family-1"], { data: [child] });
   setQuery(["family", "family-1"], { data: { id: "family-1", name: "Guardian family" } });
   setQuery(["guardians", "family-1"], { data: [{ id: "guardian-1", parent_id: "parent-1", role: "OWNER" }] });
-  setQuery(["health", "family-1"], { data: health });
-  setQuery(["activity-usage", "family-1"], { data: activity });
-  setQuery(["requests", "family-1"], { data: [request] });
+  setQuery(["health", "family-1", "child-1"], { data: health });
+  setQuery(["activity-usage", "family-1", "child-1"], { data: activity });
+  setQuery(["requests", "family-1", "child-1"], { data: [request] });
   setQuery(["device-policy"], {
     data: {
       bundle: {
@@ -168,19 +168,19 @@ test("new parent and child routes render loaded data", () => {
 test("new routes expose loading, error, and empty states with recovery", () => {
   const refetch = jest.fn();
   setQuery(["child", "family-1", "child-1"], { isLoading: true });
-  setQuery(["health", "family-1"], { isLoading: true });
+  setQuery(["health", "family-1", "child-1"], { isLoading: true });
   const loading = render(<ChildDetailRoute />);
   expect(loading.getByLabelText("Loading")).toBeTruthy();
   loading.unmount();
 
-  setQuery(["activity-usage", "family-1"], { isError: true, refetch });
+  setQuery(["activity-usage", "family-1", "child-1"], { isError: true, refetch });
   const error = render(<ActivityDetailRoute />);
   expect(error.getByText("We couldn't load this data.")).toBeTruthy();
   fireEvent.press(error.getByLabelText("Retry"));
   expect(refetch).toHaveBeenCalled();
   error.unmount();
 
-  setQuery(["requests", "family-1"], { data: [] });
+  setQuery(["requests", "family-1", "child-1"], { data: [] });
   const empty = render(<RequestDetailRoute />);
   expect(empty.getByText("Nothing to show yet.")).toBeTruthy();
 });

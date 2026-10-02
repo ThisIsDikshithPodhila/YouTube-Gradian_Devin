@@ -76,10 +76,17 @@ async def test_parent_websocket_receives_every_published_event_type(
 async def test_device_websocket_is_child_scoped_and_rejects_other_family(
     client, paired_device, parent_b
 ) -> None:
+    second_child = await client.post(
+        f"/v1/families/{paired_device.parent.family_id}/children",
+        json={"name": "Casey", "date_of_birth": "2014-08-15", "timezone": "UTC"},
+        headers={"Authorization": f"Bearer {paired_device.parent.token}"},
+    )
+    assert second_child.status_code == 201, second_child.text
+    second_child_id = UUID(second_child.json()["id"])
     task, incoming, outgoing = await connect(
         paired_device.parent.family_id,
         paired_device.device_token,
-        paired_device.parent.child_id,
+        None,
     )
     assert (await receive_json(outgoing))["type"] == "catch-up"
     await asyncio.sleep(0)
@@ -89,6 +96,15 @@ async def test_device_websocket_is_child_scoped_and_rejects_other_family(
         UUID(paired_device.parent.child_id),
     )
     assert (await receive_json(outgoing))["type"] == "request-created"
+    # Omitting child_profile_id on a device connection must still be scoped to
+    # the child bound to the credential, never the whole family.
+    broadcaster.publish(
+        UUID(paired_device.parent.family_id),
+        {"type": "other-child-event"},
+        second_child_id,
+    )
+    await asyncio.sleep(0)
+    assert outgoing.empty()
     await incoming.put({"type": "websocket.disconnect", "code": 1000})
     await task
 

@@ -40,6 +40,11 @@ object ContentSafetyServiceRuntime {
     bootstrap(context, trustedKeysJson)
   }
 
+  /** Drops the process-global runtime so it cannot evaluate a previous child's policy. */
+  fun clear() {
+    runtime = null
+  }
+
   fun processNotification(
     context: Context,
     trustedKeysJson: String,

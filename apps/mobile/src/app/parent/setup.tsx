@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Text } from "react-native";
 import { ApiError, api } from "@/api/client";
 import { useSession } from "@/auth/session";
@@ -7,7 +7,9 @@ import { PrimaryButton, ScreenScaffold, SectionSurface, TextField } from "@/desi
 
 export default function ParentSetupRoute() {
   const router = useRouter();
-  const { setFamilyId } = useSession();
+  const { familyId: storedFamilyId, setChildId, setFamilyId } = useSession();
+  const { familyId: routeFamilyId } = useLocalSearchParams<{ familyId?: string }>();
+  const existingFamilyId = routeFamilyId ?? storedFamilyId;
   const [family, setFamily] = useState("");
   const [child, setChild] = useState("");
   const [dob, setDob] = useState("");
@@ -15,22 +17,23 @@ export default function ParentSetupRoute() {
   const [message, setMessage] = useState<string | null>(null);
   const submit = async () => {
     try {
-      const createdFamily = await api.createFamily(family);
-      const createdChild = await api.createChild(createdFamily.id, { name: child, date_of_birth: dob, timezone });
-      await setFamilyId(createdFamily.id);
+      const targetFamilyId = existingFamilyId ?? (await api.createFamily(family)).id;
+      const createdChild = await api.createChild(targetFamilyId, { name: child, date_of_birth: dob, timezone });
+      await setFamilyId(targetFamilyId);
+      await setChildId(createdChild.id);
       setMessage(`Age band: ${createdChild.age_band}`);
-      router.replace({ pathname: "/parent/home", params: { familyId: createdFamily.id } });
+      router.replace({ pathname: "/parent/home", params: { familyId: targetFamilyId, childId: createdChild.id } });
     } catch (error) { setMessage(error instanceof ApiError ? error.message : "Setup failed."); }
   };
   return (
-    <ScreenScaffold title="Set up your family">
+    <ScreenScaffold title={existingFamilyId ? "Add a child" : "Set up your family"}>
       <SectionSurface>
-        <TextField label="Family name" value={family} onChangeText={setFamily} />
+        {!existingFamilyId ? <TextField label="Family name" value={family} onChangeText={setFamily} /> : null}
         <TextField label="Child name" value={child} onChangeText={setChild} />
         <TextField label="Date of birth (YYYY-MM-DD)" value={dob} onChangeText={setDob} />
         <TextField label="Timezone" value={timezone} onChangeText={setTimezone} />
         {message ? <Text accessibilityLiveRegion="polite">{message}</Text> : null}
-        <PrimaryButton label="Create family and child" onPress={submit} disabled={!family || !child || !dob || !timezone} />
+        <PrimaryButton label={existingFamilyId ? "Add child" : "Create family and child"} onPress={submit} disabled={(!existingFamilyId && !family) || !child || !dob || !timezone} />
       </SectionSurface>
     </ScreenScaffold>
   );

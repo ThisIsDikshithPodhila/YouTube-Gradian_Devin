@@ -66,9 +66,9 @@ export default function ParentRulesRoute() {
     enabled: Boolean(familyId && childId),
   });
   const health = useQuery({
-    queryKey: ["health", familyId],
-    queryFn: () => api.health(familyId),
-    enabled: Boolean(familyId),
+    queryKey: ["health", familyId, childId],
+    queryFn: () => api.health(familyId, childId),
+    enabled: Boolean(familyId && childId),
     refetchInterval: 2000,
   });
   const [pendingVersion, setPendingVersion] = useState<number | null>(null);

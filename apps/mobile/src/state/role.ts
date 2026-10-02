@@ -7,4 +7,5 @@ export const roleStorage = {
     return role === "parent" || role === "child" ? role : null;
   },
   set: (role: Role) => SecureStore.setItemAsync(ROLE_KEY, role),
+  clear: () => SecureStore.deleteItemAsync(ROLE_KEY),
 };

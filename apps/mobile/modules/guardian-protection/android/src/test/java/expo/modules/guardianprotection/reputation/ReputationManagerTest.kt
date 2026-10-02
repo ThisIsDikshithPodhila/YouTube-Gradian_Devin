@@ -21,6 +21,12 @@ class ReputationManagerTest {
       activeValue = active
       this.version = version
     }
+
+    override fun clear() {
+      activeValue = null
+      previousValue = null
+      version = null
+    }
   }
 
   private fun entry(identifier: String, verdict: String, expiresAt: String) = mapOf<String, Any?>(

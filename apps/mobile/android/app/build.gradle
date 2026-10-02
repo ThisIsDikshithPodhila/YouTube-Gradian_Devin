@@ -216,15 +216,10 @@ tasks.register("verifyGuardianReleaseAdmission", Exec) {
 def configureReleaseArtifactVerification = { String taskName, String kind, String outputDirectory, String outputPattern ->
 tasks.register(taskName, Exec) {
     group = "verification"
-    description = "Verifies the merged manifest, fixture absence, signer, and version of the signed release ${kind.toUpperCase()}."
+    description = "Verifies the shipping artifact manifest, fixture absence, signer, and version of the signed release ${kind.toUpperCase()}."
     workingDir projectRoot
     environment releaseAdmissionEnvironment
     doFirst {
-        def manifests = fileTree(buildDir).matching {
-            include "intermediates/merged_manifest/release/**/AndroidManifest.xml"
-            include "intermediates/merged_manifests/release/**/AndroidManifest.xml"
-        }.files
-        if (manifests.size() != 1) throw new GradleException("Expected exactly one merged release AndroidManifest.xml.")
         def artifacts = fileTree(outputDirectory).matching { include outputPattern }.files
         if (artifacts.size() != 1) throw new GradleException("Expected exactly one signed release ${kind.toUpperCase()}.")
         def aapt = new File(android.sdkDirectory, "build-tools/${android.buildToolsVersion}/aapt")
@@ -237,7 +232,7 @@ tasks.register(taskName, Exec) {
         if (kind == "apk" && (!aapt.isFile() || !apksigner.isFile())) throw new GradleException("Android aapt and apksigner are required for APK policy verification.")
         if (kind == "aab" && (!javaExecutable.isFile() || !keytool.isFile() || !jarsigner.isFile() || !bundletoolClasspath)) throw new GradleException("Bundletool and JDK signing tools are required for AAB policy verification.")
         commandLine "node", new File(projectRoot, "scripts/verify-release-artifact.mjs").absolutePath,
-            "--merged-manifest", manifests.first().absolutePath, "--artifact", artifacts.first().absolutePath, "--kind", kind,
+            "--artifact", artifacts.first().absolutePath, "--kind", kind,
             "--aapt", aapt.absolutePath, "--apksigner", apksigner.absolutePath,
             "--keytool", keytool.absolutePath, "--jarsigner", jarsigner.absolutePath,
             "--java", javaExecutable.absolutePath, "--bundletool-classpath", bundletoolClasspath

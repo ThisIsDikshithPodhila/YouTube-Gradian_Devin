@@ -10,6 +10,7 @@ interface ReputationSnapshotStore {
   fun previous(): String?
   fun appliedVersion(): Long?
   fun swap(active: String, version: Long)
+  fun clear()
 }
 
 data class ReputationEntry(
@@ -90,6 +91,12 @@ class ReputationManager(
   fun snapshot(): ReputationSnapshot? = active
 
   fun version(): Long? = active?.version
+
+  fun clear() {
+    active = null
+    pending.clear()
+    store.clear()
+  }
 
   fun markPending(identifier: String, timeoutMillis: Long = DEFAULT_PENDING_TIMEOUT_MS): Long {
     val expires = System.currentTimeMillis() + timeoutMillis.coerceIn(1_000L, MAX_PENDING_TIMEOUT_MS)

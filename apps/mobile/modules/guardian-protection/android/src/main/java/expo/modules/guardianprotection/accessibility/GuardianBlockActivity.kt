@@ -106,5 +106,10 @@ class GuardianBlockActivity : Activity() {
       ) return
       activity.runOnUiThread { activity.finishAndRemoveTask() }
     }
+
+    fun dismissActiveContentBlock() {
+      val activity = activeContentBlockActivity ?: return
+      activity.runOnUiThread { activity.finishAndRemoveTask() }
+    }
   }
 }

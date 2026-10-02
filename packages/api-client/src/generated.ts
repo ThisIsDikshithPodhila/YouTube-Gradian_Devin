@@ -1698,6 +1698,13 @@ export const openApiDocument = {
       },
       "ValidationError": {
         "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
           "loc": {
             "items": {
               "anyOf": [
@@ -2745,6 +2752,23 @@ export const openApiDocument = {
               "title": "Family Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "child_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Child Id"
+            }
           }
         ],
         "responses": {
@@ -2793,6 +2817,23 @@ export const openApiDocument = {
               "format": "uuid",
               "title": "Family Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "child_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Child Id"
             }
           }
         ],
@@ -3544,6 +3585,23 @@ export const openApiDocument = {
               "title": "Family Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "child_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Child Id"
+            }
           }
         ],
         "responses": {
@@ -3586,6 +3644,23 @@ export const openApiDocument = {
               "format": "uuid",
               "title": "Family Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "child_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Child Id"
             }
           }
         ],

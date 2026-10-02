@@ -9,7 +9,7 @@
   "dependencies": {
     "@guardian/contracts": "workspace:*",
     "@js-temporal/polyfill": "0.5.1",
-    "ajv": "8.17.1",
+    "ajv": "8.18.0",
     "ajv-formats": "3.0.1",
     "tldts": "7.4.10"
   },

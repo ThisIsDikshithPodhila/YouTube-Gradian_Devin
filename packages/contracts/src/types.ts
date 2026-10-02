@@ -167,6 +167,21 @@ export type ContentReviewRequest = {
   content_review: ContentReviewEvidence;
 };
 
+/** Bounded native outbox item; it deliberately has no raw observed content. */
+export type PendingContentRiskEvent = {
+  signal_source: SignalSource;
+  app_ref: string;
+  fingerprint: string;
+  category: ContentRiskCategory;
+  severity: ContentRiskSeverity;
+  confidence: number;
+  reason_code: CompositeContentRiskReasonCode;
+  classifier_version: string;
+  capability_level: CapabilityLevel;
+  action: ContentAction;
+  occurred_at_millis: number;
+};
+
 export type ContentApproval = {
   device_id: string;
   app_ref: string;
@@ -353,7 +368,10 @@ export interface GuardianProtectionNative {
   openAccessibilitySettings(): Promise<void>;
   setAccessibilityContentConsent(granted: boolean): Promise<PermissionResult>;
   setContentDeviceId(deviceId: string): Promise<void>;
+  clearChildIdentity(): Promise<void>;
   applyContentApprovals(approvals: ContentApproval[]): Promise<void>;
+  getPendingContentRiskEvents(): Promise<PendingContentRiskEvent[]>;
+  acknowledgeContentRiskEvent(signalSource: SignalSource, appRef: string, fingerprint: string): Promise<void>;
   getPendingContentReviewRequests(): Promise<ContentReviewRequest[]>;
   acknowledgeContentReviewRequest(appRef: string, fingerprint: string): Promise<void>;
   openNotificationAccessSettings(): Promise<void>;

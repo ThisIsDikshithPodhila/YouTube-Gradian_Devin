@@ -1,0 +1,187 @@
+name: Android production APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: "Positive Android versionCode (increment for every release build)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-production-apk
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and attest universal signed APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: guardian-production
+
+    steps:
+      - name: Check out the requested commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 10.14.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.13.0
+          cache: pnpm
+
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Initialize isolated Android SDK and Gradle roots
+        shell: bash
+        run: |
+          set -euo pipefail
+          bootstrap_sdk="${ANDROID_HOME:?Runner SDK is required only to bootstrap the task SDK}"
+          sdk_root="$RUNNER_TEMP/guardian-android-sdk"
+          android_user_home="$RUNNER_TEMP/guardian-android-user"
+          gradle_user_home="$RUNNER_TEMP/guardian-gradle"
+          bootstrap_sdkmanager="$bootstrap_sdk/cmdline-tools/latest/bin/sdkmanager"
+          mkdir -p "$sdk_root" "$android_user_home" "$gradle_user_home"
+          test -x "$bootstrap_sdkmanager"
+          ANDROID_USER_HOME="$android_user_home" "$bootstrap_sdkmanager" --sdk_root="$sdk_root" --licenses >/dev/null <<'EOF'
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          EOF
+          ANDROID_USER_HOME="$android_user_home" "$bootstrap_sdkmanager" --sdk_root="$sdk_root" --install "cmdline-tools;latest"
+          test -x "$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          {
+            echo "ANDROID_HOME=$sdk_root"
+            echo "ANDROID_SDK_ROOT=$sdk_root"
+            echo "ANDROID_USER_HOME=$android_user_home"
+            echo "GRADLE_USER_HOME=$gradle_user_home"
+          } >> "$GITHUB_ENV"
+          echo "$sdk_root/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$sdk_root/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Install pinned Android SDK, build tools, and NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$sdkmanager" --sdk_root="$ANDROID_HOME" --licenses >/dev/null <<'EOF'
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          EOF
+          "$sdkmanager" --sdk_root="$ANDROID_HOME" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
+          test "$(awk -F' = ' '/Pkg.Revision/{print $2}' "$ANDROID_HOME/ndk/27.1.12297006/source.properties")" = "27.1.12297006"
+
+      - name: Install locked JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Materialize signing keystore without exposing it
+        shell: bash
+        env:
+          GUARDIAN_RELEASE_KEYSTORE_BASE64: ${{ secrets.GUARDIAN_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          signing_dir="$RUNNER_TEMP/guardian-signing"
+          mkdir -p "$signing_dir"
+          test -n "$GUARDIAN_RELEASE_KEYSTORE_BASE64"
+          printf '%s' "$GUARDIAN_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$signing_dir/guardian-release.keystore"
+          test -s "$signing_dir/guardian-release.keystore"
+          printf 'GUARDIAN_RELEASE_STORE_FILE=%s\n' "$signing_dir/guardian-release.keystore" >> "$GITHUB_ENV"
+          unset GUARDIAN_RELEASE_KEYSTORE_BASE64
+
+      - name: Run release admission tests
+        working-directory: apps/mobile
+        env:
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          GUARDIAN_DOH_URL: ${{ secrets.GUARDIAN_DOH_URL }}
+          GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS: ${{ secrets.GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS }}
+          GUARDIAN_POLICY_KEY_ID: ${{ secrets.GUARDIAN_POLICY_KEY_ID }}
+          GUARDIAN_RELEASE_STORE_PASSWORD: ${{ secrets.GUARDIAN_RELEASE_STORE_PASSWORD }}
+          GUARDIAN_RELEASE_KEY_ALIAS: ${{ secrets.GUARDIAN_RELEASE_KEY_ALIAS }}
+          GUARDIAN_RELEASE_KEY_PASSWORD: ${{ secrets.GUARDIAN_RELEASE_KEY_PASSWORD }}
+          GUARDIAN_RELEASE_CERT_SHA256: ${{ secrets.GUARDIAN_RELEASE_CERT_SHA256 }}
+          GUARDIAN_RELEASE_STORE_TYPE: ${{ vars.GUARDIAN_RELEASE_STORE_TYPE || 'PKCS12' }}
+          GUARDIAN_RELEASE_VERSION_CODE: ${{ inputs.version_code }}
+          GUARDIAN_ENABLE_TEST_FIXTURES: "false"
+        run: pnpm test:release-admission
+
+      - name: Build signed universal APK and run artifact policy gate
+        working-directory: apps/mobile/android
+        env:
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          GUARDIAN_DOH_URL: ${{ secrets.GUARDIAN_DOH_URL }}
+          GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS: ${{ secrets.GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS }}
+          GUARDIAN_POLICY_KEY_ID: ${{ secrets.GUARDIAN_POLICY_KEY_ID }}
+          GUARDIAN_RELEASE_STORE_PASSWORD: ${{ secrets.GUARDIAN_RELEASE_STORE_PASSWORD }}
+          GUARDIAN_RELEASE_KEY_ALIAS: ${{ secrets.GUARDIAN_RELEASE_KEY_ALIAS }}
+          GUARDIAN_RELEASE_KEY_PASSWORD: ${{ secrets.GUARDIAN_RELEASE_KEY_PASSWORD }}
+          GUARDIAN_RELEASE_CERT_SHA256: ${{ secrets.GUARDIAN_RELEASE_CERT_SHA256 }}
+          GUARDIAN_RELEASE_STORE_TYPE: ${{ vars.GUARDIAN_RELEASE_STORE_TYPE || 'PKCS12' }}
+          GUARDIAN_RELEASE_VERSION_CODE: ${{ inputs.version_code }}
+          GUARDIAN_ENABLE_TEST_FIXTURES: "false"
+          GUARDIAN_RELEASE_REQUIRED_ABIS: "armeabi-v7a,arm64-v8a,x86,x86_64"
+        run: |
+          ./gradlew -PreactNativeArchitectures="$GUARDIAN_RELEASE_REQUIRED_ABIS" :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Record checksum, manifest, signer, and ABI evidence
+        shell: bash
+        env:
+          GUARDIAN_RELEASE_VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          set -euo pipefail
+          apk_dir="apps/mobile/android/app/build/outputs/apk/release"
+          mapfile -t apks < <(find "$apk_dir" -maxdepth 1 -type f -name '*.apk' -print)
+          test "${#apks[@]}" -eq 1
+          apk="${apks[0]}"
+          evidence="$RUNNER_TEMP/guardian-release-evidence"
+          mkdir -p "$evidence"
+          cp "$apk" "$evidence/Guardian-universal-release.apk"
+          (cd "$evidence" && sha256sum Guardian-universal-release.apk > Guardian-universal-release.apk.sha256)
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > "$evidence/manifest.badging.txt"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$apk" > "$evidence/manifest.permissions.txt"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml > "$evidence/manifest.xmltree.txt"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk" > "$evidence/signature.apksigner.txt"
+          unzip -Z1 "$apk" > "$evidence/archive.entries.txt"
+          awk -F/ '/^lib\/[^/]+\// { print $2 }' "$evidence/archive.entries.txt" | sort -u > "$evidence/native-abis.txt"
+          for abi in armeabi-v7a arm64-v8a x86 x86_64; do grep -Fxq "$abi" "$evidence/native-abis.txt"; done
+          printf '%s\n' "APK is universal for armeabi-v7a, arm64-v8a, x86, and x86_64." > "$evidence/native-abis.summary.txt"
+          grep -Fq "versionCode='${GUARDIAN_RELEASE_VERSION_CODE}'" "$evidence/manifest.badging.txt"
+          ! grep -Fqi "android debug" "$evidence/signature.apksigner.txt"
+          printf 'commit=%s\nversion_code=%s\n' "$GITHUB_SHA" "$GUARDIAN_RELEASE_VERSION_CODE" > "$evidence/build.identity.txt"
+          printf '%s\n' "Evidence contains only public artifact metadata; no keystore, passwords, backend secrets, or raw content." > "$evidence/evidence-boundary.txt"
+
+      - name: Upload installable APK and release evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: guardian-universal-release-apk-${{ inputs.version_code }}
+          path: ${{ runner.temp }}/guardian-release-evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/guardian-signing"

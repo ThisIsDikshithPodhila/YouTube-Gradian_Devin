@@ -37,6 +37,18 @@ internal object GuardianVpnPreferences {
     preferences.edit().remove(ENABLE_REQUESTED_AT).apply()
   }
 
+  /** Removes the prior child's persisted restart intent and status. */
+  fun clearChildIdentity(context: Context) {
+    context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
+      .edit()
+      .remove(ENABLED)
+      .remove(ENABLE_REQUESTED_AT)
+      .remove(RUNTIME_STATE)
+      .remove(RUNTIME_REASON)
+      .remove(RUNTIME_OBSERVED_AT)
+      .commit()
+  }
+
   fun recordRuntimeStatus(
     context: Context,
     state: GuardianVpnRuntimeState,

@@ -86,6 +86,12 @@ object ContentBlockCoordinator {
     }
   }
 
+  /** Clears only process memory; durable block state is removed by EncryptedPolicyStore. */
+  fun clearPresentationState() {
+    lastPresentationKey = null
+    lastPresentationAt = 0L
+  }
+
   private fun mayBlock(context: Context, appRef: String): Boolean {
     val info = runCatching { context.packageManager.getApplicationInfo(appRef, 0) }.getOrNull() ?: return false
     val isSystemOrUpdated = info.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0

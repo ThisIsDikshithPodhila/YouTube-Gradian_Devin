@@ -26,6 +26,15 @@ object GuardianPolicyRuntime {
     reputation = reputationManager
   }
 
+  /** Removes every child-specific in-memory enforcement reference before re-pairing. */
+  fun clear() {
+    manager = null
+    reputation = null
+    listeners.clear()
+    lastBlockedAt.clear()
+    thresholds.clear()
+  }
+
   fun hasActiveSnapshot(): Boolean = manager?.activeSnapshot() != null
 
   fun contentBlockThreshold(): ContentRiskSeverity? = manager?.activeSnapshot()?.contentBlockThreshold

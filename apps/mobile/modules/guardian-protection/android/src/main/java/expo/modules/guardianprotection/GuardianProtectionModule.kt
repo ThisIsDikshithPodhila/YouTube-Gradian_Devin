@@ -16,10 +16,13 @@ import expo.modules.guardianprotection.vpn.UserInitiatedEnableIntent
 import expo.modules.guardianprotection.vpn.UserInitiatedEnableIntentAction
 import expo.modules.guardianprotection.vpn.ProtectionStatusChange
 import expo.modules.guardianprotection.vpn.ProtectionStatusEvents
+import expo.modules.guardianprotection.inventory.PackageInventory
 import expo.modules.guardianprotection.content.ContentSafetyConsentStore
 import expo.modules.guardianprotection.content.ContentSafetyServiceRuntime
-import expo.modules.guardianprotection.content.ContentApproval
 import expo.modules.guardianprotection.content.ContentBlockCoordinator
+import expo.modules.guardianprotection.content.ContentApproval
+import expo.modules.guardianprotection.accessibility.GuardianAccessibilityService
+import expo.modules.guardianprotection.accessibility.GuardianBlockActivity
 import expo.modules.guardianprotection.observability.GuardianPerformanceMetrics
 import android.util.Log
 import android.os.SystemClock
@@ -29,7 +32,13 @@ import java.util.concurrent.atomic.AtomicReference
 
 class GuardianProtectionModule : Module() {
   private val store by lazy { EncryptedPolicyStore(requireNotNull(appContext.reactContext)) }
-  private val policyManager by lazy { PolicyManager(store, BuildConfig.GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS) }
+  private val policyManager by lazy {
+    PolicyManager(
+      store,
+      BuildConfig.GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS,
+      BuildConfig.GUARDIAN_POLICY_KEY_ID,
+    )
+  }
   private val reputationManager by lazy {
     val verifier = PolicyVerifier(parseTrustedKeys(BuildConfig.GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS))
     ReputationManager(EncryptedReputationStore(requireNotNull(appContext.reactContext))) { verifier.verify(it) }
@@ -111,6 +120,10 @@ class GuardianProtectionModule : Module() {
     AsyncFunction("setContentDeviceId") { deviceId: String ->
       store.setContentDeviceId(deviceId)
     }
+    AsyncFunction("clearChildIdentity") {
+      val context = requireNotNull(appContext.reactContext)
+      resetChildIdentity(context)
+    }
     AsyncFunction("applyContentApprovals") { approvals: List<Map<String, Any?>> ->
       val parsed = approvals.map { approval ->
         ContentApproval(
@@ -121,6 +134,12 @@ class GuardianProtectionModule : Module() {
         )
       }
       ContentBlockCoordinator.applyApprovals(requireNotNull(appContext.reactContext), parsed)
+    }
+    AsyncFunction("getPendingContentRiskEvents") {
+      store.pendingContentRiskEvents()
+    }
+    AsyncFunction("acknowledgeContentRiskEvent") { signalSource: String, appRef: String, fingerprint: String ->
+      store.acknowledgeContentRiskEvent(signalSource, appRef, fingerprint)
     }
     AsyncFunction("getPendingContentReviewRequests") {
       store.pendingContentReviewRequests()
@@ -202,6 +221,22 @@ class GuardianProtectionModule : Module() {
       val json = org.json.JSONObject(value)
       json.keys().asSequence().associateWith { key -> json.getString(key) }
     }.getOrDefault(emptyMap())
+  }
+
+  private fun resetChildIdentity(context: android.content.Context) {
+    ChildProtectionReset(
+      stopVpn = { GuardianVpnService.stop(context) },
+      clearVpnState = { GuardianVpnPreferences.clearChildIdentity(context) },
+      clearAccessibilityEnforcement = GuardianAccessibilityService::clearChildEnforcement,
+      dismissContentBlock = GuardianBlockActivity::dismissActiveContentBlock,
+      clearContentPresentation = ContentBlockCoordinator::clearPresentationState,
+      clearPolicyRuntime = GuardianPolicyRuntime::clear,
+      clearContentRuntime = ContentSafetyServiceRuntime::clear,
+      clearPersistedPolicy = policyManager::clear,
+      clearReputation = reputationManager::clear,
+      clearPackageInventory = { PackageInventory(context).clear() },
+      revokeContentConsent = { ContentSafetyConsentStore(context).setAccessibilityContentConsent(false) },
+    ).reset()
   }
 
   private fun emit(event: Map<String, Any?>) {

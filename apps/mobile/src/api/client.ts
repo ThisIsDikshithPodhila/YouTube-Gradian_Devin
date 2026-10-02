@@ -182,6 +182,13 @@ const REFRESH_TOKEN_KEY = "guardian.refresh-token";
 const DEVICE_TOKEN_KEY = "guardian.device-token";
 const DEVICE_PRIVATE_KEY_KEY = "guardian.device-private-key";
 const FAMILY_ID_KEY = "guardian.family-id";
+const SELECTED_CHILD_ID_KEY = "guardian.selected-child-id";
+const DEVICE_IDENTITY_KEYS = [
+  DEVICE_TOKEN_KEY,
+  DEVICE_PRIVATE_KEY_KEY,
+  FAMILY_ID_KEY,
+  SELECTED_CHILD_ID_KEY,
+] as const;
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number, readonly code?: string, readonly requestId?: string) {
@@ -214,9 +221,11 @@ export const sessionStorage = {
     await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
   },
   clearDeviceIdentity: async () => {
-    await SecureStore.deleteItemAsync(DEVICE_TOKEN_KEY);
-    await SecureStore.deleteItemAsync(DEVICE_PRIVATE_KEY_KEY);
-    await SecureStore.deleteItemAsync(FAMILY_ID_KEY);
+    const results = await Promise.allSettled(
+      DEVICE_IDENTITY_KEYS.map((key) => SecureStore.deleteItemAsync(key)),
+    );
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
   },
   // Retained for explicit account deletion/unpair flows only.
   clear: async () => {
@@ -228,14 +237,37 @@ export const sessionStorage = {
   setDevicePrivateKey: (key: string) => SecureStore.setItemAsync(DEVICE_PRIVATE_KEY_KEY, key),
   getFamilyId: () => SecureStore.getItemAsync(FAMILY_ID_KEY),
   setFamilyId: (familyId: string) => SecureStore.setItemAsync(FAMILY_ID_KEY, familyId),
+  getSelectedChildId: () => SecureStore.getItemAsync(SELECTED_CHILD_ID_KEY),
+  setSelectedChildId: (childId: string) => SecureStore.setItemAsync(SELECTED_CHILD_ID_KEY, childId),
+  saveDeviceCredentials: async ({
+    privateKey,
+    familyId,
+    deviceToken,
+  }: {
+    privateKey: string;
+    familyId: string;
+    deviceToken: string;
+  }) => {
+    try {
+      await SecureStore.setItemAsync(DEVICE_PRIVATE_KEY_KEY, privateKey);
+      await SecureStore.setItemAsync(FAMILY_ID_KEY, familyId);
+      // The bearer token is committed last so it can never outlive its proof material.
+      await SecureStore.setItemAsync(DEVICE_TOKEN_KEY, deviceToken);
+    } catch (error) {
+      await sessionStorage.clearDeviceIdentity().catch(() => undefined);
+      throw error;
+    }
+  },
 };
 
 export class GuardianApiClient {
   private readonly generated: GeneratedGuardianClient;
   private refreshInFlight: Promise<Tokens> | null = null;
+  private readonly baseUrl: string;
 
-  constructor(private readonly baseUrl = API_URL) {
-    this.generated = new GeneratedGuardianClient(baseUrl);
+  constructor(baseUrl = API_URL) {
+    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.generated = new GeneratedGuardianClient(this.baseUrl);
   }
 
   private async refreshParentSession(): Promise<Tokens> {
@@ -325,6 +357,22 @@ export class GuardianApiClient {
 
   signup(email: string, password: string) { return this.request<Tokens>("/v1/auth/signup", { method: "POST", body: JSON.stringify({ email, password }) }); }
   login(email: string, password: string) { return this.request<Tokens>("/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }); }
+  async logout(): Promise<void> {
+    const refreshToken = await sessionStorage.getRefreshToken();
+    try {
+      if (refreshToken) {
+        await fetch(`${this.baseUrl}/v1/auth/logout`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+      }
+    } catch {
+      // Local parent credentials must be cleared even when the device is offline.
+    } finally {
+      await sessionStorage.clearParentSession();
+    }
+  }
   me() { return this.request<Parent>("/v1/auth/me"); }
   deleteAccount() { return this.request<undefined>("/v1/auth/account", { method: "DELETE" }); }
   createFamily(name: string) { return this.request<Family>("/v1/families", { method: "POST", body: JSON.stringify({ name }) }); }
@@ -334,9 +382,15 @@ export class GuardianApiClient {
   createChild(familyId: string, input: { name: string; date_of_birth: string; timezone: string }) { return this.request<Child>(`/v1/families/${familyId}/children`, { method: "POST", body: JSON.stringify(input) }); }
   children(familyId: string) { return this.request<Child[]>(`/v1/families/${familyId}/children`); }
   child(familyId: string, childId: string) { return this.request<Child>(`/v1/families/${familyId}/children/${childId}`); }
-  health(familyId: string) { return this.request<Health[]>(`/v1/families/${familyId}/health`); }
-  activity(familyId: string) { return this.request<ActivityEvent[]>(`/v1/families/${familyId}/activity`); }
-  activityUsage(familyId: string) { return this.request<ActivityUsagePoint[]>(`/v1/families/${familyId}/activity/usage`); }
+  health(familyId: string, childId?: string) {
+    return this.request<Health[]>(`/v1/families/${familyId}/health${childId ? `?child_id=${encodeURIComponent(childId)}` : ""}`);
+  }
+  activity(familyId: string, childId?: string) {
+    return this.request<ActivityEvent[]>(`/v1/families/${familyId}/activity${childId ? `?child_id=${encodeURIComponent(childId)}` : ""}`);
+  }
+  activityUsage(familyId: string, childId?: string) {
+    return this.request<ActivityUsagePoint[]>(`/v1/families/${familyId}/activity/usage${childId ? `?child_id=${encodeURIComponent(childId)}` : ""}`);
+  }
   usageReport(familyId: string, input: { childId?: string; start: string; end: string; timezone: string; granularity?: "DAILY" | "WEEKLY" }) {
     const params = new URLSearchParams({
       start: input.start,
@@ -387,11 +441,11 @@ export class GuardianApiClient {
       body: JSON.stringify(body),
     });
   }
-  ingestEvents(events: DeviceEvent[], correlationId?: string) {
+  ingestEvents(events: DeviceEvent[], correlationId?: string, idempotencyKey?: string) {
     return this.request<undefined>("/v1/devices/me/events", {
       method: "POST",
       headers: {
-        "Idempotency-Key": `event-batch:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+        "Idempotency-Key": idempotencyKey ?? `event-batch:${Date.now()}:${Math.random().toString(36).slice(2)}`,
         ...(correlationId ? { "X-Request-ID": correlationId } : {}),
       },
       body: JSON.stringify({ events }),
@@ -430,8 +484,8 @@ export class GuardianApiClient {
       body: JSON.stringify(input),
     });
   }
-  requests(familyId: string) {
-    return this.request<AccessRequest[]>(`/v1/families/${familyId}/requests`);
+  requests(familyId: string, childId?: string) {
+    return this.request<AccessRequest[]>(`/v1/families/${familyId}/requests${childId ? `?child_id=${encodeURIComponent(childId)}` : ""}`);
   }
   contentApprovals() {
     return this.request<ContentApproval[]>("/v1/devices/me/content-approvals");
@@ -454,6 +508,24 @@ export class GuardianApiClient {
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
     return url.toString();
+  }
+
+  /**
+   * Refresh a parent access token before reconnecting realtime transport.
+   * Device credentials do not expire through the parent refresh flow, so they
+   * are returned directly when no parent session is present.
+   */
+  async realtimeToken(): Promise<string | null> {
+    const accessToken = await sessionStorage.getAccessToken();
+    if (!accessToken) return sessionStorage.getDeviceToken();
+    try {
+      await this.me();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "SESSION_EXPIRED") return null;
+      // Keep the existing token for transient network failures; the socket
+      // fallback remains honest and can retry when connectivity returns.
+    }
+    return sessionStorage.getAccessToken();
   }
 }
 

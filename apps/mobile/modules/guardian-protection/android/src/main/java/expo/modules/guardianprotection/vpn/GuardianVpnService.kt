@@ -74,7 +74,7 @@ class GuardianVpnService : VpnService() {
         stopSelf()
         return START_NOT_STICKY
       }
-      dohTransport = EncryptedDohTransport.bootstrap(dohEndpoint) { socket -> protect(socket) }
+      dohTransport = EncryptedDohTransport.bootstrap(dohEndpoint, protectSocket = { socket -> protect(socket) })
       if (dohTransport == null) {
         GuardianVpnPreferences.setEnabled(this, false)
         GuardianVpnPreferences.recordRuntimeStatus(this, GuardianVpnRuntimeState.UNAVAILABLE, "DOH_BOOTSTRAP_UNAVAILABLE")

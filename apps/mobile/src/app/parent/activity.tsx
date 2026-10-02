@@ -46,15 +46,15 @@ export function aggregateTodayUsage(
 }
 
 export default function ParentActivityRoute() {
-  const { familyId } = useLocalSearchParams<{ familyId: string }>();
+  const { familyId, childId } = useLocalSearchParams<{ familyId: string; childId?: string }>();
   const router = useRouter();
   const { isOffline } = useNetworkStatus();
-  const activity = useQuery({ queryKey: ["activity", familyId], queryFn: () => api.activity(familyId), enabled: Boolean(familyId) });
-  const activityUsage = useQuery({ queryKey: ["activity-usage", familyId], queryFn: () => api.activityUsage(familyId), enabled: Boolean(familyId) });
+  const activity = useQuery({ queryKey: ["activity", familyId, childId], queryFn: () => api.activity(familyId, childId), enabled: Boolean(familyId && childId) });
+  const activityUsage = useQuery({ queryKey: ["activity-usage", familyId, childId], queryFn: () => api.activityUsage(familyId, childId), enabled: Boolean(familyId && childId) });
   const report = useQuery({
-    queryKey: ["usage-report", familyId],
-    queryFn: () => api.usageReport(familyId, { ...reportRange(), granularity: "DAILY" }),
-    enabled: Boolean(familyId),
+    queryKey: ["usage-report", familyId, childId],
+    queryFn: () => api.usageReport(familyId, { ...reportRange(), childId, granularity: "DAILY" }),
+    enabled: Boolean(familyId && childId),
   });
   const activityEvents = activity.data ?? [];
   const activityUsagePoints = activityUsage.data ?? [];
@@ -109,7 +109,7 @@ export default function ParentActivityRoute() {
               <CardSurface key={`${point.occurred_at}-${point.app_ref ?? "unknown"}-${point.event_type}`}>
                 <ListRow label={point.app_ref ?? "Unknown app"} value={formatUsageMinutes(point.duration_seconds)} />
                 <Text>{point.category ?? "Unknown category"} · {new Date(point.occurred_at).toLocaleString()}</Text>
-                <SecondaryButton label="Open activity detail" onPress={() => router.push({ pathname: "/parent/activity-detail", params: { familyId, ...(point.app_ref ? { appId: point.app_ref } : { category: point.category ?? "UNKNOWN" }) } })} />
+                <SecondaryButton label="Open activity detail" onPress={() => router.push({ pathname: "/parent/activity-detail", params: { familyId, childId, ...(point.app_ref ? { appId: point.app_ref } : { category: point.category ?? "UNKNOWN" }) } })} />
               </CardSurface>
             )) : <Text>Unknown · no usage aggregates are available for this family.</Text>}
           </SectionSurface>

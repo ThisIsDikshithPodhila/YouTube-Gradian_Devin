@@ -158,17 +158,21 @@ async def fetch_policy(
 
 async def acknowledge_policy(
     body: DeviceAckIn,
+    request: HTTPRequest,
     device: Device = Depends(current_device),
     session: AsyncSession = Depends(get_session),
 ) -> None:
+    await verify_device_request_headers(request, device, session)
     device.policy_version_applied = body.policy_version
     await session.commit()
 
 async def heartbeat(
     body: DeviceHeartbeatIn,
+    request: HTTPRequest,
     device: Device = Depends(current_device),
     session: AsyncSession = Depends(get_session),
 ) -> None:
+    await verify_device_request_headers(request, device, session)
     device.protection_state = body.protection_state
     device.capabilities = {
         key: value.model_dump(mode="json", by_alias=True)
@@ -200,10 +204,12 @@ async def heartbeat(
 
 async def ingest_events(
     body: EventBatchIn,
+    request: HTTPRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     device: Device = Depends(current_device),
     session: AsyncSession = Depends(get_session),
 ) -> None:
+    await verify_device_request_headers(request, device, session)
     digest = payload_hash(body.model_dump(mode="json"))
     if idempotency_key is not None:
         replay = await replay_or_conflict(session, "event_batch", idempotency_key, digest)
@@ -267,9 +273,11 @@ async def ingest_events(
 
 async def ingest_inventory(
     body: ObservedAppBatchIn,
+    request: HTTPRequest,
     device: Device = Depends(current_device),
     session: AsyncSession = Depends(get_session),
 ) -> None:
+    await verify_device_request_headers(request, device, session)
     for app in body.apps:
         statement = insert(ChildAppInventory).values(
             child_profile_id=device.child_profile_id,
@@ -499,9 +507,11 @@ async def active_content_approvals(
 
 async def register_device_push_token(
     body: PushTokenIn,
+    request: HTTPRequest,
     device: Device = Depends(current_device),
     session: AsyncSession = Depends(get_session),
 ) -> None:
+    await verify_device_request_headers(request, device, session)
     token_hash = hashlib.sha256(body.token.encode()).hexdigest()
     existing = await session.scalar(
         select(PushToken).where(

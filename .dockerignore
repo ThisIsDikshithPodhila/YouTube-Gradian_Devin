@@ -1,0 +1,13 @@
+.git
+.github
+.agents
+artifacts
+**/.env
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.venv
+apps
+node_modules
+pnpm-store

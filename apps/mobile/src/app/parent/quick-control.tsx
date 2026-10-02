@@ -46,9 +46,9 @@ export default function ParentQuickControlRoute() {
   const child = children.data?.find((item) => item.id === childId);
   const actions = useMemo(() => [
     ["Rules", () => router.push({ pathname: "/parent/rules", params: { familyId, childId } })],
-    ["Requests", () => router.push({ pathname: "/parent/requests", params: { familyId } })],
-    ["Activity", () => router.push({ pathname: "/parent/activity", params: { familyId } })],
-    ["Protection health", () => router.push({ pathname: "/parent/health", params: { familyId } })],
+    ["Requests", () => router.push({ pathname: "/parent/requests", params: { familyId, childId } })],
+    ["Activity", () => router.push({ pathname: "/parent/activity", params: { familyId, childId } })],
+    ["Protection health", () => router.push({ pathname: "/parent/health", params: { familyId, childId } })],
   ] as const, [childId, familyId, router]);
   const filtered = actions.filter(([label]) => label.toLowerCase().includes(search.toLowerCase()));
   return (

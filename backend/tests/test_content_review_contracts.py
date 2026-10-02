@@ -441,7 +441,9 @@ async def test_minimized_content_event_aliases_are_normalized_and_raw_fields_rej
         headers={**paired_device.signed_headers(path, body), "Content-Type": "application/json"},
     )
     assert accepted.status_code == 202, accepted.text
-    row = await database_session.scalar(select(SafetyEvent))
+    row = await database_session.scalar(
+        select(SafetyEvent).where(SafetyEvent.content_fingerprint == FINGERPRINT_A)
+    )
     assert row is not None
     assert row.category == "SELF_HARM_SUICIDE"
     assert row.signal_source == "ACCESSIBILITY_TEXT"

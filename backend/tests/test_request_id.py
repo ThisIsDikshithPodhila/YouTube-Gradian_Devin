@@ -1,5 +1,16 @@
 import uuid
 
+from app.api.app import _safe_log_path
+
+
+def test_push_action_tokens_are_redacted_before_request_logging() -> None:
+    token = "push-action-token-that-must-not-be-logged"
+    assert (
+        _safe_log_path(f"/v1/push/actions/{token}/approve")
+        == "/v1/push/actions/[redacted]/approve"
+    )
+    assert token not in _safe_log_path(f"/v1/push/actions/{token}/deny")
+
 
 async def test_request_id_is_propagated_and_generated(client) -> None:
     supplied = str(uuid.uuid4())

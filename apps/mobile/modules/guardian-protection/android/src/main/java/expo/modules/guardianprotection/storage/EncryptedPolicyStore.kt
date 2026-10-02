@@ -14,25 +14,37 @@ import javax.crypto.spec.GCMParameterSpec
 import expo.modules.guardianprotection.usage.deviceTotalSeconds
 import expo.modules.guardianprotection.content.ContentApproval
 import expo.modules.guardianprotection.content.ContentBlockReference
+import expo.modules.guardianprotection.content.ContentAction
+import expo.modules.guardianprotection.content.ContentCapabilityLevel
 import expo.modules.guardianprotection.content.ContentRiskCategory
 import expo.modules.guardianprotection.content.ContentRiskSeverity
+import expo.modules.guardianprotection.content.SignalSource
 import org.json.JSONArray
 import java.time.Instant
+
+interface PolicySnapshotStore {
+  fun active(): String?
+  fun previous(): String?
+  fun appliedVersion(): Long?
+  fun hasCorruptState(): Boolean
+  fun swap(active: String, version: Long)
+  fun clearChildIdentity()
+}
 
 class EncryptedPolicyStore(
   context: Context,
   preferenceName: String = "guardian-protection",
-) {
+) : PolicySnapshotStore {
   private val preferences = context.getSharedPreferences(preferenceName, Context.MODE_PRIVATE)
   private val alias = "guardian-protection-state"
   private val corruptState = AtomicBoolean(false)
 
-  fun active(): String? = read("active")
-  fun previous(): String? = read("previous")
-  fun appliedVersion(): Long? = preferences.getLong("applied-version", -1).takeIf { it >= 0 }
-  fun hasCorruptState(): Boolean = corruptState.get()
+  override fun active(): String? = read("active")
+  override fun previous(): String? = read("previous")
+  override fun appliedVersion(): Long? = preferences.getLong("applied-version", -1).takeIf { it >= 0 }
+  override fun hasCorruptState(): Boolean = corruptState.get()
 
-  fun swap(active: String, version: Long) {
+  override fun swap(active: String, version: Long) {
     val old = read("active")
     preferences.edit()
       .putString("previous", old?.let { encrypt(it) })
@@ -125,6 +137,25 @@ class EncryptedPolicyStore(
 
   fun contentDeviceId(): String? = read("content-device-id")?.takeIf(DEVICE_ID_PATTERN::matches)
 
+  /** An explicit re-pairing discards the prior child's credentials and signed local state. */
+  @Synchronized
+  override fun clearChildIdentity() {
+    preferences.edit()
+      .remove("active")
+      .remove("previous")
+      .remove("applied-version")
+      .remove("content-device-id")
+      .remove("content-approvals")
+      .remove("content-risk-events")
+      .remove("content-review-outbox")
+      .remove("active-content-block")
+      .remove("content-fingerprint-key")
+      .remove("usage-counters")
+      .remove("usage-snapshots")
+      .commit()
+    corruptState.set(false)
+  }
+
   /** Bounded encrypted queue used while the JS runtime is absent. Values are pre-minimized. */
   @Synchronized
   fun appendContentRiskEvent(event: Map<String, Any>): Boolean {
@@ -141,6 +172,65 @@ class EncryptedPolicyStore(
     queue.put(JSONObject(event))
     write("content-risk-events", queue.toString())
     return true
+  }
+
+  /** Strict minimized events for transport; raw observed text is never bridged. */
+  @Synchronized
+  fun pendingContentRiskEvents(): List<Map<String, Any>> =
+    read("content-risk-events")?.let { encoded ->
+      runCatching {
+        val queue = JSONArray(encoded)
+        (0 until queue.length()).mapNotNull { index ->
+          val item = queue.optJSONObject(index) ?: return@mapNotNull null
+          runCatching {
+            val source = SignalSource.valueOf(item.getString("signal_source"))
+            val category = ContentRiskCategory.valueOf(item.getString("category"))
+            val severity = ContentRiskSeverity.valueOf(item.getString("severity"))
+            val capability = ContentCapabilityLevel.valueOf(item.getString("capability_level"))
+            val action = ContentAction.valueOf(item.getString("action"))
+            val appRef = item.getString("app_ref")
+            val fingerprint = item.getString("fingerprint")
+            val reasonCode = item.getString("reason_code")
+            val classifierVersion = item.getString("classifier_version")
+            val confidence = item.getDouble("confidence")
+            val occurredAtMillis = item.getLong("occurred_at_millis")
+            require(appRef.isNotBlank() && fingerprint.matches(Regex("^[a-f0-9]{64}$")))
+            require(reasonCode.isNotBlank() && classifierVersion.isNotBlank())
+            require(confidence in 0.0..1.0 && occurredAtMillis > 0)
+            mapOf(
+              "signal_source" to source.name,
+              "app_ref" to appRef,
+              "fingerprint" to fingerprint,
+              "category" to category.name,
+              "severity" to severity.name,
+              "confidence" to confidence,
+              "reason_code" to reasonCode,
+              "classifier_version" to classifierVersion,
+              "capability_level" to capability.name,
+              "action" to action.name,
+              "occurred_at_millis" to occurredAtMillis,
+            )
+          }.getOrNull()
+        }
+      }.getOrElse {
+        corruptState.set(true)
+        emptyList()
+      }
+    } ?: emptyList()
+
+  /** Remove exactly a successfully delivered minimized fingerprint tuple. */
+  @Synchronized
+  fun acknowledgeContentRiskEvent(signalSource: String, appRef: String, fingerprint: String) {
+    val queue = read("content-risk-events")?.let { encoded -> JSONArray(encoded) } ?: return
+    val remaining = JSONArray()
+    (0 until queue.length()).forEach { index ->
+      val item = queue.optJSONObject(index) ?: return@forEach
+      if (item.optString("signal_source") != signalSource ||
+        item.optString("app_ref") != appRef ||
+        item.optString("fingerprint") != fingerprint
+      ) remaining.put(item)
+    }
+    write("content-risk-events", remaining.toString())
   }
 
   @Synchronized
@@ -289,8 +379,6 @@ class EncryptedPolicyStore(
         emptyList()
       }
     } ?: emptyList()
-  }
-
   private fun read(key: String): String? {
     val encoded = preferences.getString(key, null) ?: return null
     return runCatching { decrypt(encoded) }.getOrElse {

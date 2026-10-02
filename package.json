@@ -7,6 +7,11 @@
   "engines": {
     "node": "22.13.0"
   },
+  "pnpm": {
+    "overrides": {
+      "uuid": "11.1.1"
+    }
+  },
   "scripts": {
     "generate:openapi": "uv run --directory backend python ../scripts/generate_openapi_client.py",
     "check:openapi": "pnpm generate:openapi && git diff --exit-code -- packages/api-client/src/generated.ts",
@@ -17,7 +22,7 @@
   "devDependencies": {
     "@eslint/js": "9.31.0",
     "@types/node": "22.15.21",
-    "ajv": "8.17.1",
+    "ajv": "8.18.0",
     "ajv-formats": "3.0.1",
     "@typescript-eslint/eslint-plugin": "8.35.1",
     "@typescript-eslint/parser": "8.35.1",

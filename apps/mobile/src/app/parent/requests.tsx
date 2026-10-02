@@ -12,20 +12,20 @@ function stateLabel(request: AccessRequest) {
 }
 
 export default function ParentRequestsRoute() {
-  const { familyId } = useLocalSearchParams<{ familyId: string }>();
+  const { familyId, childId } = useLocalSearchParams<{ familyId: string; childId?: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [reason, setReason] = useState("Reviewed with the family.");
   const { isOffline } = useNetworkStatus();
   const requests = useQuery({
-    queryKey: ["requests", familyId],
-    queryFn: () => api.requests(familyId),
-    enabled: Boolean(familyId),
+    queryKey: ["requests", familyId, childId],
+    queryFn: () => api.requests(familyId, childId),
+    enabled: Boolean(familyId && childId),
   });
-  useFamilySync(familyId, "parent");
+  useFamilySync(familyId, "parent", childId);
   const decide = useMutation({
     mutationFn: ({ requestId, decision }: { requestId: string; decision: "approve" | "deny" }) => api.decideRequest(familyId, requestId, decision, reason.trim()),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["requests", familyId] }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["requests", familyId, childId] }),
   });
   return (
     <ScreenScaffold title="Requests">
@@ -36,7 +36,7 @@ export default function ParentRequestsRoute() {
             <CardSurface key={request.id}>
               <ListRow label={request.request_type} value={stateLabel(request)} />
               <Text>{request.subject ?? "No target"} · {request.reason ?? "No child note"}</Text>
-              <PrimaryButton label="Open request detail" onPress={() => router.push({ pathname: "/parent/request-detail", params: { familyId, requestId: request.id } })} />
+              <PrimaryButton label="Open request detail" onPress={() => router.push({ pathname: "/parent/request-detail", params: { familyId, childId, requestId: request.id } })} />
               {request.state === "PENDING" ? (
                 <>
                   <PrimaryButton label="Approve" disabled={!reason.trim() || decide.isPending} onPress={() => decide.mutate({ requestId: request.id, decision: "approve" })} />

@@ -17,5 +17,6 @@ __pycache__/
 .pyenv/
 *.egg-info/
 docs/superpowers/
+.superpowers/
 tasks/
 .scratch/

@@ -1,3 +1,4 @@
+import json
 from uuid import uuid4
 
 import pytest
@@ -226,23 +227,24 @@ async def test_device_routes_and_minimized_event_validation(
     device_headers = {"Authorization": f"Bearer {paired_device.device_token}"}
     policy = await client.get("/v1/devices/me/policy", headers=device_headers)
     assert policy.status_code == 200
+    policy_ack_body = b'{"policy_version":1}'
     assert (
         await client.post(
             "/v1/devices/me/policy/ack",
-            json={"policy_version": 1},
-            headers=device_headers,
+            content=policy_ack_body,
+            headers=paired_device.signed_headers("/v1/devices/me/policy/ack", policy_ack_body),
         )
     ).status_code == 204
+    heartbeat_body = b'{"protection_state":"HEALTHY"}'
     assert (
         await client.post(
             "/v1/devices/me/heartbeat",
-            json={"protection_state": "HEALTHY"},
-            headers=device_headers,
+            content=heartbeat_body,
+            headers=paired_device.signed_headers("/v1/devices/me/heartbeat", heartbeat_body),
         )
     ).status_code == 204
-    rejected = await client.post(
-        "/v1/devices/me/events",
-        json={
+    rejected_body = json.dumps(
+        {
             "events": [
                 {
                     "event_type": "URL",
@@ -251,7 +253,12 @@ async def test_device_routes_and_minimized_event_validation(
                 }
             ]
         },
-        headers=device_headers,
+        separators=(",", ":"),
+    ).encode()
+    rejected = await client.post(
+        "/v1/devices/me/events",
+        content=rejected_body,
+        headers=paired_device.signed_headers("/v1/devices/me/events", rejected_body),
     )
     assert rejected.status_code == 422
     assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
@@ -261,16 +268,15 @@ async def test_device_routes_and_minimized_event_validation(
 async def test_device_events_and_health_are_persisted(
     client, paired_device: PairedDevice, database_session
 ) -> None:
-    headers = {"Authorization": f"Bearer {paired_device.device_token}"}
+    heartbeat_body = b'{"protection_state":"HEALTHY","capabilities":{}}'
     response = await client.post(
         "/v1/devices/me/heartbeat",
-        json={"protection_state": "HEALTHY", "capabilities": {}},
-        headers=headers,
+        content=heartbeat_body,
+        headers=paired_device.signed_headers("/v1/devices/me/heartbeat", heartbeat_body),
     )
     assert response.status_code == 204
-    response = await client.post(
-        "/v1/devices/me/events",
-        json={
+    events_body = json.dumps(
+        {
             "events": [
                 {
                     "event_type": "APP",
@@ -289,7 +295,15 @@ async def test_device_events_and_health_are_persisted(
                 },
             ]
         },
-        headers={**headers, "Idempotency-Key": "persisted-events"},
+        separators=(",", ":"),
+    ).encode()
+    response = await client.post(
+        "/v1/devices/me/events",
+        content=events_body,
+        headers={
+            **paired_device.signed_headers("/v1/devices/me/events", events_body),
+            "Idempotency-Key": "persisted-events",
+        },
     )
     assert response.status_code == 202
     assert await database_session.scalar(
@@ -449,18 +463,32 @@ async def test_revoked_device_is_rejected_on_every_device_route(
 async def test_event_batch_idempotency_replays_and_conflicts(
     client, paired_device: PairedDevice
 ) -> None:
-    headers = {
-        "Authorization": f"Bearer {paired_device.device_token}",
-        "Idempotency-Key": "events-replay",
-    }
-    body = {"events": [{"event_type": "APP", "occurred_at": "2026-01-01T00:00:00Z"}]}
-    first = await client.post("/v1/devices/me/events", json=body, headers=headers)
-    second = await client.post("/v1/devices/me/events", json=body, headers=headers)
+    body = b'{"events":[{"event_type":"APP","occurred_at":"2026-01-01T00:00:00Z"}]}'
+    first = await client.post(
+        "/v1/devices/me/events",
+        content=body,
+        headers={
+            **paired_device.signed_headers("/v1/devices/me/events", body),
+            "Idempotency-Key": "events-replay",
+        },
+    )
+    second = await client.post(
+        "/v1/devices/me/events",
+        content=body,
+        headers={
+            **paired_device.signed_headers("/v1/devices/me/events", body),
+            "Idempotency-Key": "events-replay",
+        },
+    )
     assert first.status_code == second.status_code == 202
+    conflict_body = b'{"events":[{"event_type":"DOMAIN","occurred_at":"2026-01-01T00:00:00Z"}]}'
     conflict = await client.post(
         "/v1/devices/me/events",
-        json={"events": [{"event_type": "DOMAIN", "occurred_at": "2026-01-01T00:00:00Z"}]},
-        headers=headers,
+        content=conflict_body,
+        headers={
+            **paired_device.signed_headers("/v1/devices/me/events", conflict_body),
+            "Idempotency-Key": "events-replay",
+        },
     )
     assert conflict.status_code == 409
 

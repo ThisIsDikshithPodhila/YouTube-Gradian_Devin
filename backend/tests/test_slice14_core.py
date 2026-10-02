@@ -250,11 +250,11 @@ async def test_pause_internet_uses_signed_manual_routine(client, parent_a) -> No
 
 @pytest.mark.asyncio
 async def test_device_push_token_registration_is_device_scoped(client, paired_device) -> None:
-    headers = {"Authorization": f"Bearer {paired_device.device_token}"}
+    body = b'{"platform":"ANDROID","token":"device-token-xxxxxxxxxxxxxxxxxxxx"}'
     response = await client.post(
         "/v1/devices/me/push-tokens",
-        headers=headers,
-        json={"platform": "ANDROID", "token": "device-token-" + "x" * 20},
+        headers=paired_device.signed_headers("/v1/devices/me/push-tokens", body),
+        content=body,
     )
     assert response.status_code == 204
 

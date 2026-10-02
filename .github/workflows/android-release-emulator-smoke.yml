@@ -1,0 +1,266 @@
+name: Android signed-release emulator smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: "Successful Android production APK workflow run ID"
+        required: true
+        type: string
+      release_artifact_name:
+        description: "Release artifact name, e.g. guardian-universal-release-apk-2"
+        required: true
+        type: string
+
+# This workflow deliberately receives no production secrets. It downloads an already
+# attested artifact from this repository and proves that exact APK can install and
+# launch on fresh API 35 parent and child emulator roles.
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: android-signed-release-emulator-smoke-${{ inputs.release_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Install and launch exact signed APK on API 35 parent and child roles
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+      RELEASE_ARTIFACT_NAME: ${{ inputs.release_artifact_name }}
+
+    steps:
+      - name: Validate release-run provenance without retaining credentials
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RELEASE_ARTIFACT_NAME" =~ ^guardian-universal-release-apk-[1-9][0-9]*$ ]]
+          mkdir -p artifacts/release-emulator-smoke
+          response="$RUNNER_TEMP/release-run.json"
+          curl --fail --silent --show-error --retry 3 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID" > "$response"
+          workflow_id="$(RESPONSE_PATH="$response" python -c 'import json, os; print(json.load(open(os.environ["RESPONSE_PATH"], encoding="utf-8"))["workflow_id"])')"
+          [[ "$workflow_id" =~ ^[1-9][0-9]*$ ]]
+          workflow="$RUNNER_TEMP/release-workflow.json"
+          curl --fail --silent --show-error --retry 3 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$workflow"
+          RESPONSE_PATH="$response" WORKFLOW_PATH="$workflow" EVIDENCE_PATH=artifacts/release-emulator-smoke/release-run-provenance.json python - <<'PY'
+          import json
+          import os
+          import re
+
+          source = json.load(open(os.environ["RESPONSE_PATH"], encoding="utf-8"))
+          workflow = json.load(open(os.environ["WORKFLOW_PATH"], encoding="utf-8"))
+          if source.get("name") != "Android production APK":
+              raise SystemExit("The source run is not the Android production APK workflow.")
+          if workflow.get("path") != ".github/workflows/android-release-apk.yml":
+              raise SystemExit("The source run workflow path is not the protected Android release workflow.")
+          if source.get("conclusion") != "success":
+              raise SystemExit("The source release run did not complete successfully.")
+          if source.get("head_branch") != "main":
+              raise SystemExit("Production release artifacts must originate from main.")
+          sha = source.get("head_sha", "")
+          if not re.fullmatch(r"[0-9a-f]{40}", sha):
+              raise SystemExit("The source run did not provide a valid commit SHA.")
+          safe = {
+              "workflow_name": source["name"],
+              "workflow_id": source["workflow_id"],
+              "workflow_path": workflow["path"],
+              "run_id": source["id"],
+              "conclusion": source["conclusion"],
+              "head_branch": source["head_branch"],
+              "head_sha": sha,
+              "event": source.get("event"),
+              "created_at": source.get("created_at"),
+              "updated_at": source.get("updated_at"),
+          }
+          with open(os.environ["EVIDENCE_PATH"], "w", encoding="utf-8") as destination:
+              json.dump(safe, destination, indent=2, sort_keys=True)
+              destination.write("\n")
+          PY
+          rm -f -- "$response"
+
+      - name: Download exactly the selected release artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ inputs.release_artifact_name }}
+          path: artifacts/release-source
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.release_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Initialize isolated Android SDK roots
+        shell: bash
+        run: |
+          set -euo pipefail
+          bootstrap_sdk="${ANDROID_HOME:?Runner SDK is required only to bootstrap the task SDK}"
+          sdk_root="$RUNNER_TEMP/guardian-release-smoke-android-sdk"
+          android_user_home="$RUNNER_TEMP/guardian-release-smoke-android-user"
+          bootstrap_sdkmanager="$bootstrap_sdk/cmdline-tools/latest/bin/sdkmanager"
+          mkdir -p "$sdk_root" "$android_user_home" "$RUNNER_TEMP/guardian-release-smoke-avd"
+          test -x "$bootstrap_sdkmanager"
+          ANDROID_USER_HOME="$android_user_home" "$bootstrap_sdkmanager" --sdk_root="$sdk_root" --licenses >/dev/null <<'EOF'
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          EOF
+          ANDROID_USER_HOME="$android_user_home" "$bootstrap_sdkmanager" --sdk_root="$sdk_root" --install "cmdline-tools;latest"
+          test -x "$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          {
+            echo "ANDROID_HOME=$sdk_root"
+            echo "ANDROID_SDK_ROOT=$sdk_root"
+            echo "ANDROID_USER_HOME=$android_user_home"
+            echo "ANDROID_AVD_HOME=$RUNNER_TEMP/guardian-release-smoke-avd"
+          } >> "$GITHUB_ENV"
+          echo "$sdk_root/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$sdk_root/platform-tools" >> "$GITHUB_PATH"
+          echo "$sdk_root/emulator" >> "$GITHUB_PATH"
+
+      - name: Install API 35 x86_64 emulator and artifact-verification tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$sdkmanager" --sdk_root="$ANDROID_HOME" --licenses >/dev/null <<'EOF'
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          y
+          EOF
+          "$sdkmanager" --sdk_root="$ANDROID_HOME" --install \
+            "platform-tools" "build-tools;36.0.0" "emulator" \
+            "system-images;android-35;google_apis;x86_64"
+
+      - name: Verify the downloaded artifact before installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir=artifacts/release-source
+          evidence=artifacts/release-emulator-smoke
+          apk="$source_dir/Guardian-universal-release.apk"
+          test -s "$apk"
+          test -f "$source_dir/Guardian-universal-release.apk.sha256"
+          test -f "$source_dir/build.identity.txt"
+          test -f "$source_dir/signature.apksigner.txt"
+          (cd "$source_dir" && sha256sum -c Guardian-universal-release.apk.sha256) | tee "$evidence/source-checksum.txt"
+          sha256sum "$apk" | tee "$evidence/exact-apk.sha256"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | tee "$evidence/reverified.badging.txt"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk" | tee "$evidence/reverified.apksigner.txt"
+          grep -Fq "package: name='com.guardian.family'" "$evidence/reverified.badging.txt"
+          ! grep -Fqi "android debug" "$evidence/reverified.apksigner.txt"
+          expected_cert="$(sed -nE 's/.*certificate SHA-256 digest:[[:space:]]*([0-9A-F:]+).*/\1/ip' "$source_dir/signature.apksigner.txt" | head -n1 | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
+          actual_cert="$(sed -nE 's/.*certificate SHA-256 digest:[[:space:]]*([0-9A-F:]+).*/\1/ip' "$evidence/reverified.apksigner.txt" | head -n1 | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
+          [[ "$expected_cert" =~ ^[0-9a-f]{64}$ ]]
+          test "$actual_cert" = "$expected_cert"
+          source_commit="$(sed -nE 's/^commit=([0-9a-f]{40})$/\1/p' "$source_dir/build.identity.txt")"
+          provenance_commit="$(python -c 'import json; print(json.load(open("artifacts/release-emulator-smoke/release-run-provenance.json"))["head_sha"])')"
+          test "$source_commit" = "$provenance_commit"
+          printf 'source_release_run_id=%s\nartifact_name=%s\nsource_commit=%s\ncertificate_sha256=%s\n' \
+            "$RELEASE_RUN_ID" "$RELEASE_ARTIFACT_NAME" "$source_commit" "$actual_cert" \
+            > "$evidence/artifact-identity.txt"
+
+      - name: Create distinct API 35 parent and child AVDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          avdmanager="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
+          echo no | "$avdmanager" create avd --force --name guardian-api35-release-parent \
+            --package "system-images;android-35;google_apis;x86_64" --device "pixel_5"
+          echo no | "$avdmanager" create avd --force --name guardian-api35-release-child \
+            --package "system-images;android-35;google_apis;x86_64" --device "pixel_5"
+
+      - name: Install and launch exact signed APK on parent and child roles
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=artifacts/release-source/Guardian-universal-release.apk
+          evidence=artifacts/release-emulator-smoke
+          sudo chmod 666 /dev/kvm || true
+          if [[ ! -c /dev/kvm || ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+            echo '/dev/kvm must be an existing readable/writable device for reliable dual-emulator smoke.' >&2
+            exit 1
+          fi
+          printf '%s\n' 'KVM available: running the exact release APK with hardware acceleration.' \
+            > "$evidence/emulator-acceleration.txt"
+          cleanup() {
+            adb -s emulator-5554 emu kill >/dev/null 2>&1 || true
+            adb -s emulator-5556 emu kill >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          boot_and_smoke() {
+            local role="$1"
+            local avd="$2"
+            local serial="$3"
+            local port="$4"
+            emulator -avd "$avd" -port "$port" -no-window -no-audio -no-boot-anim \
+              -gpu swiftshader_indirect -no-snapshot -wipe-data \
+              > "$evidence/$role.emulator.log" 2>&1 &
+            timeout 120 adb -s "$serial" wait-for-device
+            timeout 300 bash -c "until adb -s '$serial' shell getprop sys.boot_completed | tr -d '\\r' | grep -qx 1; do sleep 2; done"
+            {
+              printf 'role=%s\nserial=%s\navd=%s\n' "$role" "$serial" "$avd"
+              adb -s "$serial" shell getprop ro.build.fingerprint
+              adb -s "$serial" shell getprop ro.build.version.release
+              adb -s "$serial" shell getprop ro.build.version.sdk
+              adb -s "$serial" shell getprop ro.product.cpu.abi
+            } > "$evidence/$role.device.txt"
+            adb -s "$serial" install -r "$apk" | tee "$evidence/$role.install.txt"
+            adb -s "$serial" shell am start -W -n com.guardian.family/.MainActivity | tee "$evidence/$role.launch.txt"
+            sleep 5
+            adb -s "$serial" shell pidof com.guardian.family | tee "$evidence/$role.pid.txt"
+            {
+              adb -s "$serial" shell pm path com.guardian.family
+              adb -s "$serial" shell dumpsys package com.guardian.family | grep -E 'versionName=|versionCode=|firstInstallTime=|lastUpdateTime=' || true
+              adb -s "$serial" shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER com.guardian.family
+            } > "$evidence/$role.package.txt"
+            adb -s "$serial" exec-out screencap -p > "$evidence/$role.startup.png"
+            test -s "$evidence/$role.startup.png"
+            adb -s "$serial" logcat -d -v threadtime -t 500 \
+              | grep -E 'com\.guardian\.family|Guardian' > "$evidence/$role.logcat.txt" || true
+            adb -s "$serial" emu kill
+            timeout 90 bash -c "until ! adb -s '$serial' get-state >/dev/null 2>&1; do sleep 2; done"
+          }
+          boot_and_smoke parent guardian-api35-release-parent emulator-5554 5554
+          boot_and_smoke child guardian-api35-release-child emulator-5556 5556
+          sha256sum "$apk" | tee "$evidence/exact-apk.after-emulator.sha256"
+          cmp "$evidence/exact-apk.sha256" "$evidence/exact-apk.after-emulator.sha256"
+          printf '%s\n' \
+            'No existing connected instrumentation is release-compatible.' \
+            'The repository task connectedDebugAndroidTest builds and installs a debug variant, which would replace the exact signed release target.' \
+            'This smoke deliberately runs no Gradle task and does not rebuild, re-sign, or substitute the release APK.' \
+            > "$evidence/instrumentation-boundary.txt"
+
+      - name: Upload signed-release emulator evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: guardian-signed-release-api35-emulator-smoke-${{ inputs.release_run_id }}
+          path: |
+            artifacts/release-emulator-smoke/
+          if-no-files-found: warn
+          retention-days: 30

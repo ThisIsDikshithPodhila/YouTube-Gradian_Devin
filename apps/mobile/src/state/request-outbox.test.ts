@@ -1,9 +1,28 @@
 import {
+  clearRequestOutbox,
   enqueueRequest,
   flushRequestOutbox,
   readRequestOutbox,
   type QueuedAccessRequest,
 } from "@/state/request-outbox";
+
+test("clearing the outbox removes undelivered requests from a prior child", async () => {
+  const storage = new Map<string, string>();
+  await enqueueRequest(
+    {
+      id: "family-a-request",
+      request_type: "MORE_TIME",
+      subject: null,
+      reason: null,
+      state: "QUEUED",
+    },
+    storage,
+  );
+
+  await clearRequestOutbox(storage);
+
+  expect(await readRequestOutbox(storage)).toEqual([]);
+});
 
 test("queues a request and removes it after reconnect delivery", async () => {
   const storage = new Map<string, string>();
