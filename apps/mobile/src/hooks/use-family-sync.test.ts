@@ -122,6 +122,22 @@ test("falls back to polling and reconnects after a WebSocket failure", async () 
   hook.unmount();
 });
 
+test("keeps polling after a policy rejection without retrying the rejected socket", async () => {
+  const hook = renderHook(() => useFamilySync("family-1", "parent"));
+  await act(async () => { await Promise.resolve(); });
+
+  act(() => MockWebSocket.instances[0].onopen?.());
+  act(() => MockWebSocket.instances[0].onclose?.({ code: 1008 }));
+  const callsAfterRejection = mockInvalidateQueries.mock.calls.length;
+
+  act(() => jest.advanceTimersByTime(2_000));
+  expect(mockInvalidateQueries.mock.calls.length).toBeGreaterThan(callsAfterRejection);
+  act(() => jest.advanceTimersByTime(30_000));
+  expect(MockWebSocket.instances).toHaveLength(1);
+
+  hook.unmount();
+});
+
 test("refreshes a parent token before reconnecting after expiry", async () => {
   const realtimeToken = jest.spyOn(api, "realtimeToken");
   realtimeToken.mockResolvedValueOnce("parent-token");

@@ -112,7 +112,8 @@ export function useFamilySync(
           if (watchdog !== null) clearTimeout(watchdog);
           watchdog = null;
           socket = null;
-          if (event.code !== 1008) scheduleReconnect();
+          if (event.code === 1008) startPolling();
+          else scheduleReconnect();
         };
       } catch {
         if (currentGeneration === generation) scheduleReconnect();
