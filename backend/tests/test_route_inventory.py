@@ -80,6 +80,8 @@ EXPECTED_ROUTES: tuple[ExpectedRoute, ...] = (
     ("/v1/policy/public-key", "GET", "public"),
     ("/v1/push/actions/{action_token}/approve", "POST", "action-token"),
     ("/v1/push/actions/{action_token}/deny", "POST", "action-token"),
+    ("/v1/ws/child", "WEBSOCKET", "device"),
+    ("/v1/ws/parent", "WEBSOCKET", "parent"),
     ("/v1/ws/sync", "WEBSOCKET", "parent-or-device"),
 )
 
@@ -99,7 +101,11 @@ def _registered_routes() -> list[ExpectedRoute]:
     routes: list[ExpectedRoute] = []
     for route in app.routes:
         if isinstance(route, APIWebSocketRoute):
-            routes.append((route.path, "WEBSOCKET", "parent-or-device"))
+            auth_kind = {
+                "/v1/ws/child": "device",
+                "/v1/ws/parent": "parent",
+            }.get(route.path, "parent-or-device")
+            routes.append((route.path, "WEBSOCKET", auth_kind))
             continue
         if not isinstance(route, APIRoute):
             continue

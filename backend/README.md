@@ -21,6 +21,24 @@ Authentication uses Argon2id password hashes, short-lived access JWTs, and
 hashed rotating refresh tokens. Configure secrets through environment
 variables; never commit `.env`.
 
+## Foreground sync
+
+Connect with an `Authorization: Bearer <token>` WebSocket header and a
+`family_id` query parameter. Parent access tokens use `/v1/ws/parent` (optionally
+pass `child_profile_id` to follow one child); paired device credentials use
+`/v1/ws/child`. The child channel derives its profile from the device credential
+and never subscribes to siblings. Wrong role, revoked device, invalid family, or
+unrelated child closes with code 1008. `/v1/ws/sync` remains available for older
+clients, with device subscriptions restricted to their own child.
+
+On connection the server sends `{"type":"catch-up","policy_version":...,"open_requests":[...]}`;
+subsequent policy, request, and health events prompt clients to refetch their
+authenticated REST resources. The server sends `ping` after 30 seconds of
+inactivity; clients reply `pong`. Clients should reconnect and refetch after
+network interruptions. Event fanout is currently process local, so multiple
+API worker processes need a shared broker for immediate cross-worker delivery;
+reconnect catch-up and REST reconciliation remain the fallback.
+
 ## Local policy signing key
 
 The backend refuses to start when `GUARDIAN_POLICY_PRIVATE_KEY` is absent,

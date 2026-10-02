@@ -174,7 +174,7 @@ export default function ChildHomeRoute() {
     }
   }, []);
 
-  useFamilySync(familyId);
+  useFamilySync(familyId, "child");
 
   useEffect(() => {
     const subscription = GuardianProtection.subscribe((event) => {

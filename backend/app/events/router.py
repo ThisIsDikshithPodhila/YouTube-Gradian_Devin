@@ -18,6 +18,8 @@ from ..api.handler_support import (
     HTTPException,
     Parent,
     PolicyBundle,
+    RequestRow,
+    RequestState,
     SafetyEvent,
     UsageAggregate,
     UsageReportOut,
@@ -123,7 +125,9 @@ async def family_usage(
                 )
                 .order_by(UsageAggregate.occurred_at.desc())
             )
-        ).tuples().all()
+        )
+        .tuples()
+        .all()
     )
     combined: dict[tuple[UUID, date, str], tuple[UsageAggregate, int, datetime]] = {}
     for row, child_id in rows:
@@ -198,6 +202,20 @@ async def websocket_sync(
     websocket: WebSocket,
     session: AsyncSession = Depends(get_session),
 ) -> None:
+    await _sync_socket(websocket, session, None)
+
+
+async def parent_sync(websocket: WebSocket, session: AsyncSession = Depends(get_session)) -> None:
+    await _sync_socket(websocket, session, "parent")
+
+
+async def child_sync(websocket: WebSocket, session: AsyncSession = Depends(get_session)) -> None:
+    await _sync_socket(websocket, session, "child")
+
+
+async def _sync_socket(
+    websocket: WebSocket, session: AsyncSession, role: Literal["parent", "child"] | None
+) -> None:
     await websocket.accept()
     token = websocket.headers.get("authorization", "")
     if token.lower().startswith("bearer "):
@@ -213,12 +231,13 @@ async def websocket_sync(
         await websocket.close(code=1008)
         return
     parent = None
-    try:
-        parent = await parent_from_access(session, token)
-    except HTTPException:
-        pass
+    if role != "child":
+        try:
+            parent = await parent_from_access(session, token)
+        except HTTPException:
+            pass
     device = None
-    if parent is None:
+    if parent is None and role != "parent":
         digest = hashlib.sha256(token.encode()).hexdigest()
         credential = await session.scalar(
             select(DeviceCredential).where(
@@ -231,6 +250,7 @@ async def websocket_sync(
     if parent is None and (device is None or device.revoked_at is not None):
         await websocket.close(code=1008)
         return
+    child_uuid = None
     if parent is not None:
         allowed = await session.scalar(
             select(FamilyGuardian).where(
@@ -241,6 +261,20 @@ async def websocket_sync(
         if allowed is None:
             await websocket.close(code=1008)
             return
+        if child_id is not None:
+            try:
+                child_uuid = UUID(child_id)
+            except ValueError:
+                await websocket.close(code=1008)
+                return
+            child = await session.scalar(
+                select(ChildProfile).where(
+                    ChildProfile.id == child_uuid, ChildProfile.family_id == family_uuid
+                )
+            )
+            if child is None:
+                await websocket.close(code=1008)
+                return
     else:
         assert device is not None
         child = await session.scalar(
@@ -252,36 +286,40 @@ async def websocket_sync(
         if child is None or (child_id is not None and str(child.id) != child_id):
             await websocket.close(code=1008)
             return
-    bundle = None
-    if child_id is not None:
-        try:
-            child_uuid = UUID(child_id)
-        except ValueError:
-            await websocket.close(code=1008)
-            return
-        child = await session.scalar(
-            select(ChildProfile).where(
-                ChildProfile.id == child_uuid, ChildProfile.family_id == family_uuid
-            )
-        )
-        if child is None:
-            await websocket.close(code=1008)
-            return
-        bundle = await session.scalar(
-            select(PolicyBundle).where(
-                PolicyBundle.child_profile_id == child_uuid,
-                PolicyBundle.is_current.is_(True),
-            )
-        )
-    await websocket.send_json(
-        {
-            "type": "catch-up",
-            "policy_version": bundle.policy_version if bundle is not None else None,
-            "open_requests": [],
-        }
-    )
-    connection = broadcaster.subscribe(family_uuid, child_uuid if child_id is not None else None)
+        child_uuid = child.id
+    connection = broadcaster.subscribe(family_uuid, child_uuid)
     try:
+        bundle = None
+        if child_uuid is not None:
+            bundle = await session.scalar(
+                select(PolicyBundle).where(
+                    PolicyBundle.child_profile_id == child_uuid,
+                    PolicyBundle.is_current.is_(True),
+                )
+            )
+        requests = (
+            select(RequestRow.id)
+            .join(ChildProfile, ChildProfile.id == RequestRow.child_profile_id)
+            .where(
+                ChildProfile.family_id == family_uuid,
+                RequestRow.state == RequestState.PENDING.value,
+                (RequestRow.expires_at.is_(None) | (RequestRow.expires_at > datetime.now(UTC))),
+            )
+        )
+        if child_uuid is not None:
+            requests = requests.where(RequestRow.child_profile_id == child_uuid)
+        if device is not None:
+            requests = requests.where(RequestRow.device_id == device.id)
+        open_requests = [str(request_id) for request_id in (await session.scalars(requests)).all()]
+        policy_version = bundle.policy_version if bundle is not None else None
+        await session.rollback()
+        await websocket.send_json(
+            {
+                "type": "catch-up",
+                "policy_version": policy_version,
+                "open_requests": open_requests,
+            }
+        )
         while True:
             receive_task = asyncio.create_task(websocket.receive_text())
             event_task = asyncio.create_task(connection.queue.get())
@@ -292,21 +330,26 @@ async def websocket_sync(
             )
             for task in pending:
                 task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
             if not done:
                 await websocket.send_json({"type": "ping"})
                 continue
+            if receive_task in done:
+                message = receive_task.result()
+                if message != "pong":
+                    await websocket.send_json({"type": "pong"})
             if event_task in done:
                 await websocket.send_json(event_task.result())
-                continue
-            message = receive_task.result()
-            if message != "pong":
-                await websocket.send_json({"type": "pong"})
     except (WebSocketDisconnect, TimeoutError):
         return
     finally:
         broadcaster.unsubscribe(connection)
 
-router.add_api_websocket_route('/v1/ws/sync', websocket_sync)
+
+router.add_api_websocket_route("/v1/ws/parent", parent_sync)
+router.add_api_websocket_route("/v1/ws/child", child_sync)
+router.add_api_websocket_route("/v1/ws/sync", websocket_sync)
 router.add_api_route(
     "/v1/families/{family_id}/activity",
     family_activity,
