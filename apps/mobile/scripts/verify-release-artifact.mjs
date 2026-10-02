@@ -149,6 +149,10 @@ function verifyApkVersion(apk, aapt, expected) {
   const version = output(aapt, ["dump", "badging", apk]).match(/versionCode='(\d+)'/)?.[1];
   return version === expected ? [] : [`Release APK versionCode ${version ?? "is absent"} does not equal requested ${expected}.`];
 }
+export function verifyApkPackage(badging, expected) {
+  const applicationId = badging.match(/package: name='([^']+)'/)?.[1];
+  return applicationId === expected ? [] : [`Release APK package ${applicationId ?? "is absent"} does not equal ${expected}.`];
+}
 export function bundletoolDumpManifestArgs(aab, classpath) {
   return [
     "-cp", classpath,
@@ -175,7 +179,8 @@ function main() {
   if (kind === "apk") {
     const aapt = requiredFile(argument("--aapt"), "Android aapt");
     const apksigner = requiredFile(argument("--apksigner"), "Android apksigner");
-    errors.push(...verifyArtifactManifestTree(output(aapt, ["dump", "xmltree", artifact, "AndroidManifest.xml"])), ...verifyApkCertificate(artifact, apksigner), ...verifyApkVersion(artifact, aapt, expectedVersion), ...verifyApkAbis(archiveEntries(artifact)));
+    const expectedPackage = requiredValue(argument("--expected-package"), "Release APK package");
+    errors.push(...verifyArtifactManifestTree(output(aapt, ["dump", "xmltree", artifact, "AndroidManifest.xml"])), ...verifyApkCertificate(artifact, apksigner), ...verifyApkVersion(artifact, aapt, expectedVersion), ...verifyApkPackage(output(aapt, ["dump", "badging", artifact]), expectedPackage), ...verifyApkAbis(archiveEntries(artifact)));
   } else if (kind === "aab") {
     const keytool = requiredFile(argument("--keytool"), "keytool");
     const jarsigner = requiredFile(argument("--jarsigner"), "jarsigner");

@@ -17,10 +17,14 @@ concurrency:
 
 jobs:
   build:
-    name: Build and attest universal signed APK
+    name: Build and attest ${{ matrix.role }} signed APK
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: guardian-production
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [parent, child]
 
     steps:
       - name: Check out the requested commit
@@ -115,6 +119,7 @@ jobs:
       - name: Run release admission tests
         working-directory: apps/mobile
         env:
+          EXPO_PUBLIC_GUARDIAN_ROLE: ${{ matrix.role }}
           EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
           GUARDIAN_DOH_URL: ${{ secrets.GUARDIAN_DOH_URL }}
           GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS: ${{ secrets.GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS }}
@@ -128,9 +133,10 @@ jobs:
           GUARDIAN_ENABLE_TEST_FIXTURES: "false"
         run: pnpm test:release-admission
 
-      - name: Build signed universal APK and run artifact policy gate
+      - name: Build signed role-specific universal APK and run artifact policy gate
         working-directory: apps/mobile/android
         env:
+          EXPO_PUBLIC_GUARDIAN_ROLE: ${{ matrix.role }}
           EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
           GUARDIAN_DOH_URL: ${{ secrets.GUARDIAN_DOH_URL }}
           GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS: ${{ secrets.GUARDIAN_POLICY_TRUSTED_PUBLIC_KEYS }}
@@ -144,7 +150,7 @@ jobs:
           GUARDIAN_ENABLE_TEST_FIXTURES: "false"
           GUARDIAN_RELEASE_REQUIRED_ABIS: "armeabi-v7a,arm64-v8a,x86,x86_64"
         run: |
-          ./gradlew -PreactNativeArchitectures="$GUARDIAN_RELEASE_REQUIRED_ABIS" :app:assembleRelease --no-daemon --stacktrace
+          ./gradlew -PguardianRole="${{ matrix.role }}" -PreactNativeArchitectures="$GUARDIAN_RELEASE_REQUIRED_ABIS" :app:assembleRelease --no-daemon --stacktrace
 
       - name: Record checksum, manifest, signer, and ABI evidence
         shell: bash
@@ -158,8 +164,8 @@ jobs:
           apk="${apks[0]}"
           evidence="$RUNNER_TEMP/guardian-release-evidence"
           mkdir -p "$evidence"
-          cp "$apk" "$evidence/Guardian-universal-release.apk"
-          (cd "$evidence" && sha256sum Guardian-universal-release.apk > Guardian-universal-release.apk.sha256)
+          cp "$apk" "$evidence/Guardian-${{ matrix.role }}-release.apk"
+          (cd "$evidence" && sha256sum "Guardian-${{ matrix.role }}-release.apk" > "Guardian-${{ matrix.role }}-release.apk.sha256")
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > "$evidence/manifest.badging.txt"
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$apk" > "$evidence/manifest.permissions.txt"
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml > "$evidence/manifest.xmltree.txt"
@@ -169,14 +175,15 @@ jobs:
           for abi in armeabi-v7a arm64-v8a x86 x86_64; do grep -Fxq "$abi" "$evidence/native-abis.txt"; done
           printf '%s\n' "APK is universal for armeabi-v7a, arm64-v8a, x86, and x86_64." > "$evidence/native-abis.summary.txt"
           grep -Fq "versionCode='${GUARDIAN_RELEASE_VERSION_CODE}'" "$evidence/manifest.badging.txt"
+          grep -Fq "package: name='com.guardian.family.${{ matrix.role }}'" "$evidence/manifest.badging.txt"
           ! grep -Fqi "android debug" "$evidence/signature.apksigner.txt"
-          printf 'commit=%s\nversion_code=%s\n' "$GITHUB_SHA" "$GUARDIAN_RELEASE_VERSION_CODE" > "$evidence/build.identity.txt"
+          printf 'commit=%s\nversion_code=%s\nrole=%s\n' "$GITHUB_SHA" "$GUARDIAN_RELEASE_VERSION_CODE" "${{ matrix.role }}" > "$evidence/build.identity.txt"
           printf '%s\n' "Evidence contains only public artifact metadata; no keystore, passwords, backend secrets, or raw content." > "$evidence/evidence-boundary.txt"
 
       - name: Upload installable APK and release evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: guardian-universal-release-apk-${{ inputs.version_code }}
+          name: guardian-${{ matrix.role }}-release-apk-${{ inputs.version_code }}
           path: ${{ runner.temp }}/guardian-release-evidence/
           if-no-files-found: error
           retention-days: 30

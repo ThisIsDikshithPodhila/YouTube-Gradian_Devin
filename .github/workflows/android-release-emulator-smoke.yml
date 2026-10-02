@@ -8,13 +8,13 @@ on:
         required: true
         type: string
       release_artifact_name:
-        description: "Release artifact name, e.g. guardian-universal-release-apk-2"
+        description: "Release artifact name, e.g. guardian-child-release-apk-2"
         required: true
         type: string
 
 # This workflow deliberately receives no production secrets. It downloads an already
 # attested artifact from this repository and proves that exact APK can install and
-# launch on fresh API 35 parent and child emulator roles.
+# launch on its fresh API 35 emulator role.
 permissions:
   actions: read
   contents: read
@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   smoke:
-    name: Install and launch exact signed APK on API 35 parent and child roles
+    name: Install and launch exact signed APK on API 35
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -40,7 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$RELEASE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$RELEASE_ARTIFACT_NAME" =~ ^guardian-universal-release-apk-[1-9][0-9]*$ ]]
+          [[ "$RELEASE_ARTIFACT_NAME" =~ ^guardian-(universal|parent|child)-release-apk-[1-9][0-9]*$ ]]
           mkdir -p artifacts/release-emulator-smoke
           response="$RUNNER_TEMP/release-run.json"
           curl --fail --silent --show-error --retry 3 \
@@ -162,16 +162,23 @@ jobs:
           set -euo pipefail
           source_dir=artifacts/release-source
           evidence=artifacts/release-emulator-smoke
-          apk="$source_dir/Guardian-universal-release.apk"
+          role="${RELEASE_ARTIFACT_NAME#guardian-}"
+          role="${role%%-release-apk-*}"
+          package=com.guardian.family
+          if [[ "$role" != universal ]]; then
+            package="${package}.${role}"
+            grep -Fxq "role=$role" "$source_dir/build.identity.txt"
+          fi
+          apk="$source_dir/Guardian-${role}-release.apk"
           test -s "$apk"
-          test -f "$source_dir/Guardian-universal-release.apk.sha256"
+          test -f "$source_dir/Guardian-${role}-release.apk.sha256"
           test -f "$source_dir/build.identity.txt"
           test -f "$source_dir/signature.apksigner.txt"
-          (cd "$source_dir" && sha256sum -c Guardian-universal-release.apk.sha256) | tee "$evidence/source-checksum.txt"
+          (cd "$source_dir" && sha256sum -c "Guardian-${role}-release.apk.sha256") | tee "$evidence/source-checksum.txt"
           sha256sum "$apk" | tee "$evidence/exact-apk.sha256"
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | tee "$evidence/reverified.badging.txt"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk" | tee "$evidence/reverified.apksigner.txt"
-          grep -Fq "package: name='com.guardian.family'" "$evidence/reverified.badging.txt"
+          grep -Fq "package: name='${package}'" "$evidence/reverified.badging.txt"
           ! grep -Fqi "android debug" "$evidence/reverified.apksigner.txt"
           expected_cert="$(sed -nE 's/.*certificate SHA-256 digest:[[:space:]]*([0-9A-F:]+).*/\1/ip' "$source_dir/signature.apksigner.txt" | head -n1 | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
           actual_cert="$(sed -nE 's/.*certificate SHA-256 digest:[[:space:]]*([0-9A-F:]+).*/\1/ip' "$evidence/reverified.apksigner.txt" | head -n1 | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
@@ -194,11 +201,15 @@ jobs:
           echo no | "$avdmanager" create avd --force --name guardian-api35-release-child \
             --package "system-images;android-35;google_apis;x86_64" --device "pixel_5"
 
-      - name: Install and launch exact signed APK on parent and child roles
+      - name: Install and launch exact signed APK on its Android role
         shell: bash
         run: |
           set -euo pipefail
-          apk=artifacts/release-source/Guardian-universal-release.apk
+          role="${RELEASE_ARTIFACT_NAME#guardian-}"
+          role="${role%%-release-apk-*}"
+          apk="artifacts/release-source/Guardian-${role}-release.apk"
+          package=com.guardian.family
+          if [[ "$role" != universal ]]; then package="${package}.${role}"; fi
           evidence=artifacts/release-emulator-smoke
           sudo chmod 666 /dev/kvm || true
           if [[ ! -c /dev/kvm || ! -r /dev/kvm || ! -w /dev/kvm ]]; then
@@ -230,13 +241,13 @@ jobs:
               adb -s "$serial" shell getprop ro.product.cpu.abi
             } > "$evidence/$role.device.txt"
             adb -s "$serial" install -r "$apk" | tee "$evidence/$role.install.txt"
-            adb -s "$serial" shell am start -W -n com.guardian.family/.MainActivity | tee "$evidence/$role.launch.txt"
+            adb -s "$serial" shell am start -W -n "$package/com.guardian.family.MainActivity" | tee "$evidence/$role.launch.txt"
             sleep 5
-            adb -s "$serial" shell pidof com.guardian.family | tee "$evidence/$role.pid.txt"
+            adb -s "$serial" shell pidof "$package" | tee "$evidence/$role.pid.txt"
             {
-              adb -s "$serial" shell pm path com.guardian.family
-              adb -s "$serial" shell dumpsys package com.guardian.family | grep -E 'versionName=|versionCode=|firstInstallTime=|lastUpdateTime=' || true
-              adb -s "$serial" shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER com.guardian.family
+              adb -s "$serial" shell pm path "$package"
+              adb -s "$serial" shell dumpsys package "$package" | grep -E 'versionName=|versionCode=|firstInstallTime=|lastUpdateTime=' || true
+              adb -s "$serial" shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER "$package"
             } > "$evidence/$role.package.txt"
             adb -s "$serial" exec-out screencap -p > "$evidence/$role.startup.png"
             test -s "$evidence/$role.startup.png"
@@ -245,8 +256,12 @@ jobs:
             adb -s "$serial" emu kill
             timeout 90 bash -c "until ! adb -s '$serial' get-state >/dev/null 2>&1; do sleep 2; done"
           }
-          boot_and_smoke parent guardian-api35-release-parent emulator-5554 5554
-          boot_and_smoke child guardian-api35-release-child emulator-5556 5556
+          if [[ "$role" == universal || "$role" == parent ]]; then
+            boot_and_smoke parent guardian-api35-release-parent emulator-5554 5554
+          fi
+          if [[ "$role" == universal || "$role" == child ]]; then
+            boot_and_smoke child guardian-api35-release-child emulator-5556 5556
+          fi
           sha256sum "$apk" | tee "$evidence/exact-apk.after-emulator.sha256"
           cmp "$evidence/exact-apk.sha256" "$evidence/exact-apk.after-emulator.sha256"
           printf '%s\n' \
