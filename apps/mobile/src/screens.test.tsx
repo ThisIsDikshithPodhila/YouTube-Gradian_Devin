@@ -16,6 +16,7 @@ const mockSetAccessibilityContentConsent = jest.fn((granted: boolean) => {
   return Promise.resolve({ granted: true });
 });
 const mockOpenAccessibilitySettings = jest.fn(() => Promise.resolve());
+const mockRequestVpnPermission = jest.fn(() => Promise.resolve({ granted: false }));
 const mockApplyPolicyBundle = jest.fn<Promise<{ applied: boolean }>, [unknown]>();
 const mockStartProtection = jest.fn<Promise<void>, []>();
 const mockGetReputationStatus = jest.fn(() => Promise.resolve({ version: 0 }));
@@ -119,6 +120,7 @@ jest.mock("../modules/guardian-protection/src", () => ({
     getUsageSummary: () => Promise.resolve({ byTarget: {} }),
     openUsageAccessSettings: jest.fn(),
     openAccessibilitySettings: () => mockOpenAccessibilitySettings(),
+    requestVpnPermission: () => mockRequestVpnPermission(),
     setAccessibilityContentConsent: (granted: boolean) => mockSetAccessibilityContentConsent(granted),
     getPendingContentRiskEvents: () => Promise.resolve([]),
     acknowledgeContentRiskEvent: () => Promise.resolve(),
@@ -178,6 +180,7 @@ beforeEach(() => {
   mockGuardianSubscriptionRemove.mockReset();
   mockGetCapabilities.mockReset();
   mockGetProtectionStatus.mockReset();
+  mockRequestVpnPermission.mockClear();
   mockApplyPolicyBundle.mockReset();
   mockApplyPolicyBundle.mockResolvedValue({ applied: true });
   mockStartProtection.mockReset();
@@ -729,6 +732,33 @@ test("Child home surfaces unavailable app blocking with a recovery action", asyn
   const reduced = render(<ChildHomeScreen />);
   await waitFor(() => expect(reduced.getByText("Web protection is active, but coverage may be limited. Some traffic may bypass Guardian.")).toBeTruthy());
   reduced.unmount();
+});
+
+test("Child home offers VPN consent when native capability reports it unavailable", async () => {
+  mockGuardianCapabilities = {
+    vpn_filtering: { level: "UNAVAILABLE", detail: "VPN consent is required before Guardian can start protection." },
+    web_filtering: { level: "UNAVAILABLE" },
+    app_blocking: { level: "UNAVAILABLE" },
+  };
+  const alert = jest.spyOn(Alert, "alert").mockImplementation((_title, _message, buttons) => {
+    buttons?.find((button) => button.text === "Allow VPN")?.onPress?.();
+  });
+  const screen = render(<ChildHomeScreen />);
+  await waitFor(() => expect(screen.getByLabelText("Enable web protection")).toBeTruthy());
+  fireEvent.press(screen.getByLabelText("Enable web protection"));
+  expect(mockRequestVpnPermission).toHaveBeenCalledTimes(1);
+
+  mockGuardianCapabilities = {
+    vpn_filtering: { level: "LIMITED" },
+    web_filtering: { level: "LIMITED" },
+    app_blocking: { level: "FULL" },
+  };
+  act(() => {
+    mockGuardianEventListener?.({ type: "PROTECTION_STATUS_CHANGED" });
+  });
+  await waitFor(() => expect(screen.queryByLabelText("Enable web protection")).toBeNull());
+  screen.unmount();
+  alert.mockRestore();
 });
 
 test("Child home applies app-blocking capability events without polling native state", async () => {

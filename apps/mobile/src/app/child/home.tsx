@@ -79,6 +79,7 @@ export default function ChildHomeRoute() {
   const revoked = isRevokedDeviceError(policy.error);
   const [protectionMessage, setProtectionMessage] = useState("Checking web protection…");
   const [canRetryProtection, setCanRetryProtection] = useState(false);
+  const [canEnableWebProtection, setCanEnableWebProtection] = useState(false);
   const [accessibilitySignals, setAccessibilitySignals] = useState<{
     level: string;
     detail?: string | null;
@@ -178,6 +179,7 @@ export default function ChildHomeRoute() {
     const webActive = webCapability.level === "LIMITED" || webCapability.level === "FULL";
     const vpnActive = status.active && vpnReady;
     setCanRetryProtection(!vpnActive && vpnReady);
+    setCanEnableWebProtection(!vpnReady);
     setProtectionMessage(
       !vpnActive
         ? vpnReady
@@ -334,6 +336,7 @@ export default function ChildHomeRoute() {
       }
       const capabilities = await GuardianProtection.getCapabilities();
       const vpnReady = capabilities.vpn_filtering.level === "LIMITED" || capabilities.vpn_filtering.level === "FULL";
+      setCanEnableWebProtection(!vpnReady);
       if (!vpnReady) {
         setProtectionMessage(capabilities.vpn_filtering.detail ?? "Web protection permission is required.");
         return;
@@ -476,7 +479,7 @@ export default function ChildHomeRoute() {
             ) : null}
             {appBlockedMessage ? <Text>APP_BLOCKED: {appBlockedMessage}</Text> : null}
             {timeMessage ? <Text>TIME: {timeMessage}</Text> : null}
-            {protectionMessage === "Web protection permission is required." ? (
+            {canEnableWebProtection ? (
               <PrimaryButton
                 label="Enable web protection"
                 onPress={() => Alert.alert(
