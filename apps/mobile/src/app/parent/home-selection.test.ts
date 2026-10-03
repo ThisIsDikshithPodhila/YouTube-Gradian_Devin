@@ -21,3 +21,8 @@ test("switching after setup replaces a stale child route with the selected child
   });
   expect(resolveActiveChildId("child-a", "child-b", "child-b")).toBe("child-a");
 });
+
+test("falls back to an existing child when saved selections are stale", () => {
+  expect(resolveActiveChildId("removed-child", "old-child", "child-a", ["child-a"])).toBe("child-a");
+  expect(resolveActiveChildId("removed-child", undefined, undefined, [])).toBeUndefined();
+});
