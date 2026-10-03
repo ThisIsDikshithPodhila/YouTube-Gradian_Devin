@@ -72,6 +72,7 @@ function isRevokedDeviceError(error: unknown): boolean {
 }
 
 export default function ChildHomeRoute() {
+  const limitedChildBuild = process.env.EXPO_PUBLIC_GUARDIAN_LIMITED_CHILD === "true";
   const router = useRouter();
   const policy = useQuery({ queryKey: ["device-policy"], queryFn: () => api.policy() });
   const { isOffline } = useNetworkStatus();
@@ -342,7 +343,7 @@ export default function ChildHomeRoute() {
         return;
       }
       const communication = policy.data.bundle as { communication_safety?: { enabled?: boolean } };
-      if (communication.communication_safety?.enabled && capabilities.communication_risk_signals.level === "UNAVAILABLE") {
+      if (!limitedChildBuild && communication.communication_safety?.enabled && capabilities.communication_risk_signals.level === "UNAVAILABLE") {
         setProtectionMessage("Communication safety permission is required.");
       }
       await GuardianProtection.startProtection();
@@ -445,7 +446,9 @@ export default function ChildHomeRoute() {
               />
             ) : null}
             {reputationMessage ? <Text accessibilityRole="alert">{reputationMessage}</Text> : null}
-            {appBlockingAvailable === false ? (
+            {limitedChildBuild ? (
+              <Text accessibilityRole="alert">This web-only test build cannot enforce app limits or provide notification-based safety. Usage and time shown here are informational.</Text>
+            ) : appBlockingAvailable === false ? (
               <>
                 <Text>App limits are not being enforced right now. Re-enable Accessibility to restore app blocking.</Text>
                 <PrimaryButton
@@ -454,7 +457,7 @@ export default function ChildHomeRoute() {
                 />
               </>
             ) : null}
-            {accessibilitySignals?.level === "UNAVAILABLE" &&
+            {limitedChildBuild ? null : accessibilitySignals?.level === "UNAVAILABLE" &&
             accessibilitySignals.detail === ACCESSIBILITY_SIGNALS_DISABLED_BY_PARENT_POLICY ? (
               <Text accessibilityRole="alert">Disabled by parent policy. Ask a parent to enable Android content-safety signals.</Text>
             ) : (
@@ -464,12 +467,12 @@ export default function ChildHomeRoute() {
                 <SecondaryButton label="Turn off content-safety inspection" onPress={() => { void GuardianProtection.setAccessibilityContentConsent(false); }} />
               </>
             )}
-            <Text>
+            {!limitedChildBuild ? <Text>
               Communication Safety checks notification signals from supported communication apps.
               Guardian analyzes notification text briefly on this device, discards it, and sends
               only category, severity, confidence, source app, time, and reason. Guardian cannot
               read message history, passwords, or content outside notifications.
-            </Text>
+            </Text> : null}
             {blockedEvent ? (
               <Text>
                 WEB_BLOCKED events: {blockedEventCount} · {blockedEvent.domain} ·{" "}
@@ -492,7 +495,7 @@ export default function ChildHomeRoute() {
                 )}
               />
             ) : null}
-            {protectionMessage === "Communication safety permission is required." ? (
+            {!limitedChildBuild && protectionMessage === "Communication safety permission is required." ? (
               <PrimaryButton
                 label="Restore communication safety permission"
                 onPress={() => Alert.alert(
@@ -507,7 +510,7 @@ export default function ChildHomeRoute() {
             ) : null}
             <PrimaryButton label="My time" onPress={() => router.push("/child/time")} />
             <PrimaryButton label="My simple rules" onPress={() => router.push("/child/rules-summary")} />
-            {timeMessage?.includes("expired") ? <PrimaryButton label="Open time-up" onPress={() => router.push("/child/time-up")} /> : null}
+            {!limitedChildBuild && timeMessage?.includes("expired") ? <PrimaryButton label="Open time-up" onPress={() => router.push("/child/time-up")} /> : null}
             <PrimaryButton label="Ask for help" onPress={() => router.push("/child/requests")} />
           </SectionSurface>
         </DataState>

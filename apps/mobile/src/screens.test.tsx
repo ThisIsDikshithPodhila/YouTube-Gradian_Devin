@@ -734,6 +734,31 @@ test("Child home surfaces unavailable app blocking with a recovery action", asyn
   reduced.unmount();
 });
 
+test("limited Child build shows its unavailable protections without offering sensitive permissions", async () => {
+  process.env.EXPO_PUBLIC_GUARDIAN_LIMITED_CHILD = "true";
+  try {
+    mockGuardianCapabilities = {
+      vpn_filtering: { level: "UNAVAILABLE", detail: "VPN consent is required before Guardian can start protection." },
+      web_filtering: { level: "UNAVAILABLE" },
+      app_blocking: { level: "UNAVAILABLE", detail: "App limits are unavailable in this build." },
+      accessibility_signals: { level: "UNAVAILABLE" },
+    };
+    const screen = render(<ChildHomeScreen />);
+    await waitFor(() => expect(screen.getByText("This web-only test build cannot enforce app limits or provide notification-based safety. Usage and time shown here are informational.")).toBeTruthy());
+    expect(screen.queryByLabelText("Enable app limits")).toBeNull();
+    expect(screen.queryByLabelText("Enable content-safety inspection")).toBeNull();
+    expect(screen.getByLabelText("Enable web protection")).toBeTruthy();
+    screen.unmount();
+    const requests = render(<ChildRequestsScreen />);
+    expect(requests.queryByLabelText("Ask for more time")).toBeNull();
+    expect(requests.queryByLabelText("Ask to unblock app")).toBeNull();
+    expect(requests.getByLabelText("Ask to unblock site")).toBeTruthy();
+    requests.unmount();
+  } finally {
+    delete process.env.EXPO_PUBLIC_GUARDIAN_LIMITED_CHILD;
+  }
+});
+
 test("Child home offers VPN consent when native capability reports it unavailable", async () => {
   mockGuardianCapabilities = {
     vpn_filtering: { level: "UNAVAILABLE", detail: "VPN consent is required before Guardian can start protection." },

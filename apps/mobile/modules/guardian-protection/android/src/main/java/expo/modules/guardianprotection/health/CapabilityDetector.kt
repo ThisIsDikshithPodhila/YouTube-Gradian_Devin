@@ -3,12 +3,16 @@ package expo.modules.guardianprotection.health
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
+import android.content.ComponentName
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.net.VpnService
 import android.net.ConnectivityManager
+import android.os.Build
 import android.provider.Settings
 import android.os.Process
 import expo.modules.guardianprotection.accessibility.GuardianAccessibilityService
+import expo.modules.guardianprotection.communication.GuardianNotificationListenerService
 import expo.modules.guardianprotection.content.ContentSafetyConsentStore
 import expo.modules.guardianprotection.content.ContentSafetyServiceRuntime
 import expo.modules.guardianprotection.inventory.PackageInventory
@@ -21,7 +25,10 @@ import java.time.Instant
 class CapabilityDetector(private val context: Context) {
   fun getCapabilities(): Map<String, Map<String, Any?>> {
     val now = Instant.now().toString()
-    val accessibilityPermissionGranted = accessibilityGranted()
+    val accessibilitySupported = serviceRegistered(GuardianAccessibilityService::class.java)
+    val notificationSupported = serviceRegistered(GuardianNotificationListenerService::class.java)
+    val accessibilityPermissionGranted = accessibilitySupported && accessibilityGranted()
+    val notificationPermissionGranted = notificationSupported && notificationAccessGranted()
     val accessibilityLocalConsentGranted = ContentSafetyConsentStore(context)
       .hasAccessibilityContentConsent()
     val signedPolicyAllowsAccessibility = accessibilityPermissionGranted &&
@@ -38,27 +45,28 @@ class CapabilityDetector(private val context: Context) {
     return mapOf(
       "vpn_filtering" to status(vpn.vpnLevel, now, vpn.detail),
       "app_usage" to status(if (usageAccessGranted()) "FULL" else "UNAVAILABLE", now, "Usage Access"),
-      "accessibility_signals" to status(
-        accessibilitySignals.level,
-        now,
-        accessibilitySignals.detail,
-      ),
+      "accessibility_signals" to if (accessibilitySupported) status(
+        accessibilitySignals.level, now, accessibilitySignals.detail,
+      ) else status("UNAVAILABLE", now, "Accessibility content inspection is unavailable in this build."),
       "notification_signals" to status(
-        if (notificationAccessGranted()) "BEST_EFFORT" else "UNAVAILABLE",
+        if (notificationPermissionGranted) "BEST_EFFORT" else "UNAVAILABLE",
         now,
-        if (notificationAccessGranted()) "Notification metadata is partial and may be unavailable for some apps."
+        if (!notificationSupported) "Notification-based safety is unavailable in this build."
+        else if (notificationPermissionGranted) "Notification metadata is partial and may be unavailable for some apps."
         else "Notification-listener consent is required; no notification content is collected.",
       ),
       "app_blocking" to status(
-        if (accessibilityGranted() && GuardianAccessibilityService.isRunning()) "FULL" else "UNAVAILABLE",
+        if (accessibilityPermissionGranted && GuardianAccessibilityService.isRunning()) "FULL" else "UNAVAILABLE",
         now,
-        if (accessibilityGranted()) "Accessibility app blocking" else "Accessibility permission",
+        if (!accessibilitySupported) "App limits are unavailable in this build."
+        else if (accessibilityPermissionGranted) "Accessibility app blocking" else "Accessibility permission",
       ),
       "web_filtering" to status(vpn.webLevel, now, vpn.webDetail),
       "communication_risk_signals" to status(
-        if (notificationAccessGranted()) "BEST_EFFORT" else "UNAVAILABLE",
+        if (notificationPermissionGranted) "BEST_EFFORT" else "UNAVAILABLE",
         now,
-        if (notificationAccessGranted()) {
+        if (!notificationSupported) "Notification-based safety is unavailable in this build."
+        else if (notificationPermissionGranted) {
           "Android notification listener with deterministic rules; raw content is discarded in memory"
         } else {
           "Android notification-listener consent is required; no message content is collected"
@@ -80,11 +88,15 @@ class CapabilityDetector(private val context: Context) {
   }
 
   fun openAccessibilitySettings() {
-    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    if (serviceRegistered(GuardianAccessibilityService::class.java)) {
+      context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
   }
 
   fun openNotificationAccessSettings() {
-    context.startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    if (serviceRegistered(GuardianNotificationListenerService::class.java)) {
+      context.startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
   }
 
   fun observedApps(): List<Map<String, Any?>> = PackageInventory(context).observedApps()
@@ -106,6 +118,21 @@ class CapabilityDetector(private val context: Context) {
   private fun notificationAccessGranted(): Boolean {
     val enabled = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners") ?: return false
     return enabled.split(':').any { it.startsWith(context.packageName) }
+  }
+
+  private fun serviceRegistered(service: Class<*>): Boolean {
+    val component = ComponentName(context, service)
+    return try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        context.packageManager.getServiceInfo(component, PackageManager.ComponentInfoFlags.of(0))
+      } else {
+        @Suppress("DEPRECATION")
+        context.packageManager.getServiceInfo(component, 0)
+      }
+      true
+    } catch (_: PackageManager.NameNotFoundException) {
+      false
+    }
   }
 
   private fun vpnCapability(): VpnCapability {

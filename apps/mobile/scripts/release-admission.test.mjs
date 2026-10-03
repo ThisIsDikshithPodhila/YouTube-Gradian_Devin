@@ -171,6 +171,21 @@ test("release admission rejects every supported fixture truthy value", async () 
   }
 });
 
+test("limited Child release requires an explicit matching app role", async () => {
+  const environment = await validEnvironment();
+  assert.ok(validateReleaseAdmission({
+    ...environment,
+    GUARDIAN_RELEASE_LIMITED_CHILD: "true",
+    EXPO_PUBLIC_GUARDIAN_ROLE: "parent",
+  }).some((error) => error.includes("matching Child role")));
+  assert.deepEqual(validateReleaseAdmission({
+    ...environment,
+    GUARDIAN_RELEASE_LIMITED_CHILD: "true",
+    EXPO_PUBLIC_GUARDIAN_ROLE: "child",
+    EXPO_PUBLIC_GUARDIAN_LIMITED_CHILD: "true",
+  }), []);
+});
+
 test("Android release sources declare SDK 36, no debug signing, and fail-closed admission", async () => {
   const buildFile = await readFile(
     new URL("../android/app/build.gradle", import.meta.url),
@@ -334,6 +349,46 @@ test("APK manifest-tree policy verifier rejects changed shipping declarations", 
   assert.ok(errors.some((error) => error.includes("CHILD_MONITORING_DISCLOSURE")));
   assert.ok(errors.some((error) => error.includes("GuardianVpnService")));
   assert.ok(errors.some((error) => error.includes("fixture")));
+});
+
+test("limited Child APK requires VPN and omits sensitive services", () => {
+  const tree = `
+    E: application
+      A: android:allowBackup(0x01010080)=(type 0x12)0x0
+      A: android:usesCleartextTraffic(0x010104ec)=(type 0x12)0x0
+      E: meta-data
+        A: android:name(0x01010003)="isMonitoringTool"
+        A: android:value(0x01010024)="child_monitoring"
+      E: meta-data
+        A: android:name(0x01010003)="com.guardian.family.CHILD_MONITORING_DISCLOSURE"
+      E: meta-data
+        A: android:name(0x01010003)="com.guardian.family.VPN_DECLARATION"
+      E: meta-data
+        A: android:name(0x01010003)="com.guardian.family.LIMITED_CHILD_BUILD"
+        A: android:value(0x01010024)=(type 0x12)0xffffffff
+      E: service
+        A: android:name(0x01010003)="GuardianVpnService"`;
+  assert.deepEqual(verifyArtifactManifestTree(tree, true), []);
+  assert.ok(verifyArtifactManifestTree(tree).some((error) => error.includes("GuardianAccessibilityService")));
+  assert.ok(verifyArtifactManifestTree(`${tree}\n        A: android:name="GuardianAccessibilityService"`, true)
+    .some((error) => error.includes("must not declare GuardianAccessibilityService")));
+  assert.ok(verifyArtifactManifestTree(tree.replace("0xffffffff", "0x0"), true)
+    .some((error) => error.includes("LIMITED_CHILD_BUILD=true")));
+});
+
+test("limited Child bundle rejects sensitive declarations and requires a marker", () => {
+  const manifest = `<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:allowBackup="false" android:usesCleartextTraffic="false">
+      <meta-data android:name="isMonitoringTool" android:value="child_monitoring" />
+      <meta-data android:name="com.guardian.family.CHILD_MONITORING_DISCLOSURE" />
+      <meta-data android:name="com.guardian.family.VPN_DECLARATION" />
+      <meta-data android:name="com.guardian.family.LIMITED_CHILD_BUILD" android:value="true" />
+      <service android:name="GuardianVpnService" />
+    </application></manifest>`;
+  assert.deepEqual(verifyArtifactManifestXml(manifest, "AAB", true), []);
+  assert.ok(verifyArtifactManifestXml(manifest, "AAB").some((error) => error.includes("GuardianAccessibilityService")));
+  assert.ok(verifyArtifactManifestXml(manifest.replace("GuardianVpnService", "GuardianNotificationListenerService"), "AAB", true)
+    .some((error) => error.includes("must not declare GuardianNotificationListenerService")));
 });
 
 test("APK manifest-tree policy binds monitoring values to their metadata nodes", () => {

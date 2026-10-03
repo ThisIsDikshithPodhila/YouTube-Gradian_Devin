@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+  <application>
+    <meta-data android:name="com.guardian.family.LIMITED_CHILD_BUILD" android:value="true" />
+    <meta-data android:name="com.guardian.family.ACCESSIBILITY_DECLARATION" tools:node="remove" />
+    <service android:name="expo.modules.guardianprotection.accessibility.GuardianAccessibilityService" tools:node="remove" />
+    <service android:name="expo.modules.guardianprotection.communication.GuardianNotificationListenerService" tools:node="remove" />
+  </application>
+</manifest>
