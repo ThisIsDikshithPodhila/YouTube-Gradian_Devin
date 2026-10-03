@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useRouter } from "expo-router";
-import { Alert, AppState, Platform, Text } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { Alert, AppState, Linking, Platform, Text } from "react-native";
 import { ApiError, api, sessionStorage, type DeviceEvent } from "@/api/client";
 import { useFamilySync } from "@/hooks/use-family-sync";
 import { useNetworkStatus } from "@/state/network";
@@ -74,6 +74,7 @@ function isRevokedDeviceError(error: unknown): boolean {
 export default function ChildHomeRoute() {
   const limitedChildBuild = process.env.EXPO_PUBLIC_GUARDIAN_LIMITED_CHILD === "true";
   const router = useRouter();
+  const { openYouTube } = useLocalSearchParams<{ openYouTube?: string }>();
   const policy = useQuery({ queryKey: ["device-policy"], queryFn: () => api.policy() });
   const { isOffline } = useNetworkStatus();
   const [familyId, setFamilyId] = useState<string>();
@@ -92,6 +93,8 @@ export default function ChildHomeRoute() {
   const [timeMessage, setTimeMessage] = useState<string | null>(null);
   const [reputationMessage, setReputationMessage] = useState<string | null>(null);
   const [acknowledgedVersion, setAcknowledgedVersion] = useState<number | null>(null);
+  const [webProtectionActive, setWebProtectionActive] = useState(false);
+  const openedYouTube = useRef(false);
   const usageUploaded = useRef(false);
   const inventoryUploaded = useRef(false);
   const policyUnavailable = isOffline || policy.isError;
@@ -179,6 +182,7 @@ export default function ChildHomeRoute() {
     const vpnReady = vpnCapability.level === "LIMITED" || vpnCapability.level === "FULL";
     const webActive = webCapability.level === "LIMITED" || webCapability.level === "FULL";
     const vpnActive = status.active && vpnReady;
+    setWebProtectionActive(vpnActive);
     setCanRetryProtection(!vpnActive && vpnReady);
     setCanEnableWebProtection(!vpnReady);
     setProtectionMessage(
@@ -219,6 +223,16 @@ export default function ChildHomeRoute() {
   }, []);
 
   useFamilySync(familyId, "child");
+
+  useEffect(() => {
+    if (openYouTube !== "true" || !webProtectionActive ||
+        acknowledgedVersion !== policy.data?.policy_version || openedYouTube.current) return;
+    openedYouTube.current = true;
+    router.setParams({ openYouTube: undefined });
+    void Linking.openURL("https://www.youtube.com/").catch(() => {
+      Alert.alert("YouTube unavailable", "Open YouTube from your home screen or try again later.");
+    });
+  }, [openYouTube, webProtectionActive, acknowledgedVersion, policy.data?.policy_version, router]);
 
   useEffect(() => {
     const subscription = GuardianProtection.subscribe((event) => {
@@ -435,6 +449,7 @@ export default function ChildHomeRoute() {
               />
             ) : null}
             <Text>{protectionMessage}</Text>
+            {openYouTube === "true" ? <Text>YouTube will open after web protection is active.</Text> : null}
             {canRetryProtection ? (
               <PrimaryButton
                 label="Retry web protection"
