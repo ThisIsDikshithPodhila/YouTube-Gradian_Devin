@@ -41,7 +41,7 @@ jest.mock("@/api/client", () => ({
   sessionStorage: { getFamilyId: jest.fn().mockResolvedValue("family-1") },
 }));
 
-jest.mock("../../../modules/guardian-protection/src", () => ({
+jest.mock("../modules/guardian-protection/src", () => ({
   GuardianProtection: {
     getProtectionStatus: () => mockGetProtectionStatus(),
     getCapabilities: () => mockGetCapabilities(),
