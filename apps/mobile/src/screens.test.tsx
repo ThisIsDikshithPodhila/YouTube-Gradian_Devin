@@ -368,6 +368,22 @@ test("Protection Health renders permission-denied and platform-unavailable capab
   expect(screen.getByText("DEGRADED")).toBeTruthy();
 });
 
+test("Parent release shows paired device health without requesting child-device permissions", () => {
+  process.env.EXPO_PUBLIC_GUARDIAN_ROLE = "parent";
+  try {
+    setQuery(["health", "family-1", "child-1"], { data: [] });
+    const screen = render(<HealthScreen />);
+    expect(screen.getByText("Device health")).toBeTruthy();
+    expect(screen.getByText("Grant protection permissions on the paired Child device. Its reported health and acknowledged policy are shown above.")).toBeTruthy();
+    expect(screen.queryByText("On-device capabilities")).toBeNull();
+    expect(screen.queryByLabelText("Open Accessibility for app limits")).toBeNull();
+    expect(screen.queryByLabelText("Restore Communication Safety permission")).toBeNull();
+    screen.unmount();
+  } finally {
+    delete process.env.EXPO_PUBLIC_GUARDIAN_ROLE;
+  }
+});
+
 test("Child device requires explicit content-inspection consent before opening Accessibility settings", async () => {
   const alert = jest.spyOn(Alert, "alert").mockImplementation((_title, _message, buttons) => {
     const continueButton = buttons?.find((button) => button.text === "Continue to Accessibility settings");

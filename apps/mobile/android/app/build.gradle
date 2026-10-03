@@ -172,7 +172,9 @@ android {
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
     sourceSets {
-        if (limitedChildRelease) {
+        if (guardianRole == "parent") {
+            release.manifest.srcFile "src/parent/AndroidManifest.xml"
+        } else if (limitedChildRelease) {
             release.manifest.srcFile "src/limited/AndroidManifest.xml"
         }
     }

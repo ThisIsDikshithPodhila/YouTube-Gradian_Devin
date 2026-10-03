@@ -11,6 +11,12 @@ const REQUIRED_SERVICES = [
 ];
 const LIMITED_CHILD_EXCLUDED_SERVICES = ["GuardianAccessibilityService", "GuardianNotificationListenerService"];
 const LIMITED_CHILD_MARKER = "com.guardian.family.LIMITED_CHILD_BUILD";
+const PARENT_MARKER = "com.guardian.family.PARENT_CONTROLLER";
+const PARENT_EXCLUDED_COMPONENTS = [...REQUIRED_SERVICES, "GuardianBootReceiver", "GuardianBlockActivity"];
+const PARENT_EXCLUDED_PERMISSIONS = [
+  "CAMERA", "FOREGROUND_SERVICE", "RECEIVE_BOOT_COMPLETED", "PACKAGE_USAGE_STATS",
+  "BIND_VPN_SERVICE", "BIND_ACCESSIBILITY_SERVICE", "BIND_NOTIFICATION_LISTENER_SERVICE",
+];
 const REQUIRED_METADATA = {
   isMonitoringTool: "child_monitoring",
   "com.guardian.family.CHILD_MONITORING_DISCLOSURE": undefined,
@@ -25,31 +31,44 @@ function metadataTag(xml, name) {
   return Array.from(xml.matchAll(/<meta-data\b[^>]*>/g)).find((tag) => tag[0].includes(`android:name="${name}"`))?.[0];
 }
 
-export function verifyArtifactManifestXml(xml, artifactLabel, limitedChild = false) {
+export function verifyArtifactManifestXml(xml, artifactLabel, limitedChild = false, parentRole = false) {
   const errors = [];
   const prefix = `Release ${artifactLabel} manifest`;
   const application = applicationTag(xml);
   if (!/android:allowBackup="false"/.test(application)) errors.push(`${prefix} must set android:allowBackup=false.`);
   if (!/android:usesCleartextTraffic="false"/.test(application)) errors.push(`${prefix} must set android:usesCleartextTraffic=false.`);
   for (const [name, requiredValue] of Object.entries(REQUIRED_METADATA)) {
-    if (limitedChild && name === "com.guardian.family.ACCESSIBILITY_DECLARATION") continue;
+    if (parentRole || (limitedChild && name === "com.guardian.family.ACCESSIBILITY_DECLARATION")) continue;
     const metadata = metadataTag(xml, name);
     if (!metadata || (requiredValue && !metadata.includes(`android:value="${requiredValue}"`))) {
       errors.push(name === "isMonitoringTool" ? `${prefix} must declare isMonitoringTool=child_monitoring.` : `${prefix} is missing required metadata ${name}.`);
     }
   }
-  for (const service of limitedChild ? ["GuardianVpnService"] : REQUIRED_SERVICES) {
+  for (const service of parentRole ? [] : limitedChild ? ["GuardianVpnService"] : REQUIRED_SERVICES) {
     if (!xml.includes(service)) errors.push(`${prefix} is missing ${service}.`);
   }
-  if (limitedChild) {
+  if (parentRole) {
+    if (!metadataTag(xml, PARENT_MARKER)?.includes('android:value="true"')) errors.push(`${prefix} must declare ${PARENT_MARKER}=true.`);
+    for (const name of [...Object.keys(REQUIRED_METADATA), LIMITED_CHILD_MARKER]) {
+      if (metadataTag(xml, name)) errors.push(`${prefix} must not declare ${name} for the Parent app.`);
+    }
+    for (const component of PARENT_EXCLUDED_COMPONENTS) {
+      if (xml.includes(component)) errors.push(`${prefix} must not declare ${component} for the Parent app.`);
+    }
+    for (const permission of PARENT_EXCLUDED_PERMISSIONS) {
+      if (xml.includes(`android.permission.${permission}`)) errors.push(`${prefix} must not declare ${permission} for the Parent app.`);
+    }
+  } else if (limitedChild) {
     if (!metadataTag(xml, LIMITED_CHILD_MARKER)?.includes('android:value="true"')) errors.push(`${prefix} must declare ${LIMITED_CHILD_MARKER}=true.`);
     if (metadataTag(xml, "com.guardian.family.ACCESSIBILITY_DECLARATION")) errors.push(`${prefix} must not declare Accessibility in a limited Child build.`);
     for (const service of LIMITED_CHILD_EXCLUDED_SERVICES) if (xml.includes(service)) errors.push(`${prefix} must not declare ${service}.`);
     for (const permission of ["BIND_ACCESSIBILITY_SERVICE", "BIND_NOTIFICATION_LISTENER_SERVICE"]) {
       if (xml.includes(permission)) errors.push(`${prefix} must not declare ${permission}.`);
     }
-  } else if (metadataTag(xml, LIMITED_CHILD_MARKER)) {
-    errors.push(`${prefix} must not claim to be a limited Child build.`);
+  } else {
+    for (const marker of [LIMITED_CHILD_MARKER, PARENT_MARKER]) {
+      if (metadataTag(xml, marker)) errors.push(`${prefix} must not declare ${marker}.`);
+    }
   }
   for (const permission of PROHIBITED_PERMISSIONS) if (xml.includes(`android.permission.${permission}`)) errors.push(`${prefix} contains prohibited permission ${permission}.`);
   if (FIXTURE_MARKER.test(xml)) errors.push(`${prefix} must not contain fixture declarations.`);
@@ -82,7 +101,7 @@ function xmlTreeNodeHasTrueValue(node) {
   );
 }
 
-export function verifyArtifactManifestTree(tree, limitedChild = false) {
+export function verifyArtifactManifestTree(tree, limitedChild = false, parentRole = false) {
   const errors = [];
   for (const attribute of ["allowBackup", "usesCleartextTraffic"]) {
     const line = tree.split("\n").find((candidate) => candidate.includes(`android:${attribute}(`));
@@ -93,17 +112,32 @@ export function verifyArtifactManifestTree(tree, limitedChild = false) {
     xmlTreeNodeHasStringAttribute(node, "name", "isMonitoringTool")
       && xmlTreeNodeHasStringAttribute(node, "value", "child_monitoring"),
   );
-  if (!monitoringMetadata) errors.push("Release APK manifest tree must declare isMonitoringTool=child_monitoring.");
+  if (!parentRole && !monitoringMetadata) errors.push("Release APK manifest tree must declare isMonitoringTool=child_monitoring.");
   for (const required of Object.keys(REQUIRED_METADATA).filter((name) => name !== "isMonitoringTool")) {
-    if (limitedChild && required === "com.guardian.family.ACCESSIBILITY_DECLARATION") continue;
+    if (parentRole || (limitedChild && required === "com.guardian.family.ACCESSIBILITY_DECLARATION")) continue;
     if (!metadataNodes.some((node) => xmlTreeNodeHasStringAttribute(node, "name", required))) {
       errors.push(`Release APK manifest tree is missing metadata ${required}.`);
     }
   }
-  for (const service of limitedChild ? ["GuardianVpnService"] : REQUIRED_SERVICES) {
+  for (const service of parentRole ? [] : limitedChild ? ["GuardianVpnService"] : REQUIRED_SERVICES) {
     if (!tree.includes(service)) errors.push(`Release APK manifest tree is missing ${service}.`);
   }
-  if (limitedChild) {
+  if (parentRole) {
+    if (!metadataNodes.some((node) =>
+      xmlTreeNodeHasStringAttribute(node, "name", PARENT_MARKER) && xmlTreeNodeHasTrueValue(node),
+    )) errors.push(`Release APK manifest tree must declare ${PARENT_MARKER}=true.`);
+    for (const name of [...Object.keys(REQUIRED_METADATA), LIMITED_CHILD_MARKER]) {
+      if (metadataNodes.some((node) => xmlTreeNodeHasStringAttribute(node, "name", name))) {
+        errors.push(`Release APK manifest tree must not declare ${name} for the Parent app.`);
+      }
+    }
+    for (const component of PARENT_EXCLUDED_COMPONENTS) {
+      if (tree.includes(component)) errors.push(`Release APK manifest tree must not declare ${component} for the Parent app.`);
+    }
+    for (const permission of PARENT_EXCLUDED_PERMISSIONS) {
+      if (tree.includes(`android.permission.${permission}`)) errors.push(`Release APK manifest tree must not declare ${permission} for the Parent app.`);
+    }
+  } else if (limitedChild) {
     if (!metadataNodes.some((node) =>
       xmlTreeNodeHasStringAttribute(node, "name", LIMITED_CHILD_MARKER) && xmlTreeNodeHasTrueValue(node),
     )) errors.push(`Release APK manifest tree must declare ${LIMITED_CHILD_MARKER}=true.`);
@@ -112,8 +146,12 @@ export function verifyArtifactManifestTree(tree, limitedChild = false) {
     for (const permission of ["BIND_ACCESSIBILITY_SERVICE", "BIND_NOTIFICATION_LISTENER_SERVICE"]) {
       if (tree.includes(permission)) errors.push(`Release APK manifest tree must not declare ${permission}.`);
     }
-  } else if (metadataNodes.some((node) => xmlTreeNodeHasStringAttribute(node, "name", LIMITED_CHILD_MARKER))) {
-    errors.push("Release APK manifest tree must not claim to be a limited Child build.");
+  } else {
+    for (const marker of [LIMITED_CHILD_MARKER, PARENT_MARKER]) {
+      if (metadataNodes.some((node) => xmlTreeNodeHasStringAttribute(node, "name", marker))) {
+        errors.push(`Release APK manifest tree must not declare ${marker}.`);
+      }
+    }
   }
   for (const permission of PROHIBITED_PERMISSIONS) if (tree.includes(`android.permission.${permission}`)) errors.push(`Release APK manifest tree contains prohibited permission ${permission}.`);
   if (FIXTURE_MARKER.test(tree)) errors.push("Release APK manifest tree contains fixture content.");
@@ -208,6 +246,7 @@ function main() {
   const artifact = requiredFile(argument("--artifact"), "Release artifact");
   const kind = argument("--kind");
   const limitedChild = process.env.GUARDIAN_RELEASE_LIMITED_CHILD === "true";
+  const parentRole = argument("--expected-package") === "com.guardian.family.parent";
   if (limitedChild && argument("--expected-package") !== "com.guardian.family.child") {
     throw new Error("Limited release must use the Child package.");
   }
@@ -219,7 +258,7 @@ function main() {
     const aapt = requiredFile(argument("--aapt"), "Android aapt");
     const apksigner = requiredFile(argument("--apksigner"), "Android apksigner");
     const expectedPackage = requiredValue(argument("--expected-package"), "Release APK package");
-    errors.push(...verifyArtifactManifestTree(output(aapt, ["dump", "xmltree", artifact, "AndroidManifest.xml"]), limitedChild), ...verifyApkCertificate(artifact, apksigner), ...verifyApkVersion(artifact, aapt, expectedVersion), ...verifyApkPackage(output(aapt, ["dump", "badging", artifact]), expectedPackage), ...verifyApkAbis(archiveEntries(artifact)));
+    errors.push(...verifyArtifactManifestTree(output(aapt, ["dump", "xmltree", artifact, "AndroidManifest.xml"]), limitedChild, parentRole), ...verifyApkCertificate(artifact, apksigner), ...verifyApkVersion(artifact, aapt, expectedVersion), ...verifyApkPackage(output(aapt, ["dump", "badging", artifact]), expectedPackage), ...verifyApkAbis(archiveEntries(artifact)));
   } else if (kind === "aab") {
     const keytool = requiredFile(argument("--keytool"), "keytool");
     const jarsigner = requiredFile(argument("--jarsigner"), "jarsigner");
@@ -234,7 +273,7 @@ function main() {
     );
     errors.push(
       ...verifyAabCertificate(artifact, keytool, jarsigner),
-      ...verifyArtifactManifestXml(manifest, "AAB", limitedChild),
+      ...verifyArtifactManifestXml(manifest, "AAB", limitedChild, parentRole),
       ...verifyAabVersion(manifest, expectedVersion),
     );
   } else throw new Error("Release artifact kind must be apk or aab.");

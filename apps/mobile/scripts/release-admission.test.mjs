@@ -391,6 +391,40 @@ test("limited Child bundle rejects sensitive declarations and requires a marker"
     .some((error) => error.includes("must not declare GuardianNotificationListenerService")));
 });
 
+test("Parent APK manifest omits child-device services and permissions", () => {
+  const tree = `
+    E: application
+      A: android:allowBackup(0x01010080)=(type 0x12)0x0
+      A: android:usesCleartextTraffic(0x010104ec)=(type 0x12)0x0
+      E: meta-data
+        A: android:name(0x01010003)="com.guardian.family.PARENT_CONTROLLER"
+        A: android:value(0x01010024)=(type 0x12)0xffffffff`;
+  assert.deepEqual(verifyArtifactManifestTree(tree, false, true), []);
+  for (const declaration of [
+    'E: service\n        A: android:name(0x01010003)="GuardianAccessibilityService"',
+    'E: service\n        A: android:name(0x01010003)="GuardianNotificationListenerService"',
+    'E: service\n        A: android:name(0x01010003)="GuardianVpnService"',
+    'E: uses-permission\n        A: android:name(0x01010003)="android.permission.PACKAGE_USAGE_STATS"',
+    'E: meta-data\n        A: android:name(0x01010003)="isMonitoringTool"',
+  ]) {
+    assert.ok(verifyArtifactManifestTree(`${tree}\n      ${declaration}`, false, true).length > 0);
+  }
+  assert.ok(verifyArtifactManifestTree(tree.replace("0xffffffff", "0x0"), false, true)
+    .some((error) => error.includes("PARENT_CONTROLLER=true")));
+});
+
+test("Parent bundle manifest requires controller marker and excludes child protection", () => {
+  const manifest = `<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:allowBackup="false" android:usesCleartextTraffic="false">
+      <meta-data android:name="com.guardian.family.PARENT_CONTROLLER" android:value="true" />
+    </application></manifest>`;
+  assert.deepEqual(verifyArtifactManifestXml(manifest, "AAB", false, true), []);
+  assert.ok(verifyArtifactManifestXml(manifest.replace('android:value="true"', 'android:value="false"'), "AAB", false, true)
+    .some((error) => error.includes("PARENT_CONTROLLER=true")));
+  assert.ok(verifyArtifactManifestXml(manifest.replace("</application>", '<service android:name="GuardianVpnService" /></application>'), "AAB", false, true)
+    .some((error) => error.includes("GuardianVpnService")));
+});
+
 test("APK manifest-tree policy binds monitoring values to their metadata nodes", () => {
   const tree = `
     E: manifest
