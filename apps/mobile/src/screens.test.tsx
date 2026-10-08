@@ -16,6 +16,7 @@ const mockSetAccessibilityContentConsent = jest.fn((granted: boolean) => {
   return Promise.resolve({ granted: true });
 });
 const mockOpenAccessibilitySettings = jest.fn(() => Promise.resolve());
+const mockRequestVpnPermission = jest.fn(() => Promise.resolve({ granted: false }));
 const mockApplyPolicyBundle = jest.fn<Promise<{ applied: boolean }>, [unknown]>();
 const mockStartProtection = jest.fn<Promise<void>, []>();
 const mockGetReputationStatus = jest.fn(() => Promise.resolve({ version: 0 }));
@@ -119,6 +120,7 @@ jest.mock("../modules/guardian-protection/src", () => ({
     getUsageSummary: () => Promise.resolve({ byTarget: {} }),
     openUsageAccessSettings: jest.fn(),
     openAccessibilitySettings: () => mockOpenAccessibilitySettings(),
+    requestVpnPermission: () => mockRequestVpnPermission(),
     setAccessibilityContentConsent: (granted: boolean) => mockSetAccessibilityContentConsent(granted),
     getPendingContentRiskEvents: () => Promise.resolve([]),
     acknowledgeContentRiskEvent: () => Promise.resolve(),
@@ -178,6 +180,7 @@ beforeEach(() => {
   mockGuardianSubscriptionRemove.mockReset();
   mockGetCapabilities.mockReset();
   mockGetProtectionStatus.mockReset();
+  mockRequestVpnPermission.mockClear();
   mockApplyPolicyBundle.mockReset();
   mockApplyPolicyBundle.mockResolvedValue({ applied: true });
   mockStartProtection.mockReset();
@@ -363,6 +366,22 @@ test("Protection Health renders permission-denied and platform-unavailable capab
   expect(screen.getAllByText("Permission denied").length).toBeGreaterThan(0);
   expect(screen.getByText("Platform unavailable")).toBeTruthy();
   expect(screen.getByText("DEGRADED")).toBeTruthy();
+});
+
+test("Parent release shows paired device health without requesting child-device permissions", () => {
+  process.env.EXPO_PUBLIC_GUARDIAN_ROLE = "parent";
+  try {
+    setQuery(["health", "family-1", "child-1"], { data: [] });
+    const screen = render(<HealthScreen />);
+    expect(screen.getByText("Device health")).toBeTruthy();
+    expect(screen.getByText("Grant protection permissions on the paired Child device. Its reported health and acknowledged policy are shown above.")).toBeTruthy();
+    expect(screen.queryByText("On-device capabilities")).toBeNull();
+    expect(screen.queryByLabelText("Open Accessibility for app limits")).toBeNull();
+    expect(screen.queryByLabelText("Restore Communication Safety permission")).toBeNull();
+    screen.unmount();
+  } finally {
+    delete process.env.EXPO_PUBLIC_GUARDIAN_ROLE;
+  }
 });
 
 test("Child device requires explicit content-inspection consent before opening Accessibility settings", async () => {
@@ -729,6 +748,58 @@ test("Child home surfaces unavailable app blocking with a recovery action", asyn
   const reduced = render(<ChildHomeScreen />);
   await waitFor(() => expect(reduced.getByText("Web protection is active, but coverage may be limited. Some traffic may bypass Guardian.")).toBeTruthy());
   reduced.unmount();
+});
+
+test("limited Child build shows its unavailable protections without offering sensitive permissions", async () => {
+  process.env.EXPO_PUBLIC_GUARDIAN_LIMITED_CHILD = "true";
+  try {
+    mockGuardianCapabilities = {
+      vpn_filtering: { level: "UNAVAILABLE", detail: "VPN consent is required before Guardian can start protection." },
+      web_filtering: { level: "UNAVAILABLE" },
+      app_blocking: { level: "UNAVAILABLE", detail: "App limits are unavailable in this build." },
+      accessibility_signals: { level: "UNAVAILABLE" },
+    };
+    const screen = render(<ChildHomeScreen />);
+    await waitFor(() => expect(screen.getByText("This web-only test build cannot enforce app limits or provide notification-based safety. Usage and time shown here are informational.")).toBeTruthy());
+    expect(screen.queryByLabelText("Enable app limits")).toBeNull();
+    expect(screen.queryByLabelText("Enable content-safety inspection")).toBeNull();
+    expect(screen.getByLabelText("Enable web protection")).toBeTruthy();
+    screen.unmount();
+    const requests = render(<ChildRequestsScreen />);
+    expect(requests.queryByLabelText("Ask for more time")).toBeNull();
+    expect(requests.queryByLabelText("Ask to unblock app")).toBeNull();
+    expect(requests.getByLabelText("Ask to unblock site")).toBeTruthy();
+    requests.unmount();
+  } finally {
+    delete process.env.EXPO_PUBLIC_GUARDIAN_LIMITED_CHILD;
+  }
+});
+
+test("Child home offers VPN consent when native capability reports it unavailable", async () => {
+  mockGuardianCapabilities = {
+    vpn_filtering: { level: "UNAVAILABLE", detail: "VPN consent is required before Guardian can start protection." },
+    web_filtering: { level: "UNAVAILABLE" },
+    app_blocking: { level: "UNAVAILABLE" },
+  };
+  const alert = jest.spyOn(Alert, "alert").mockImplementation((_title, _message, buttons) => {
+    buttons?.find((button) => button.text === "Allow VPN")?.onPress?.();
+  });
+  const screen = render(<ChildHomeScreen />);
+  await waitFor(() => expect(screen.getByLabelText("Enable web protection")).toBeTruthy());
+  fireEvent.press(screen.getByLabelText("Enable web protection"));
+  expect(mockRequestVpnPermission).toHaveBeenCalledTimes(1);
+
+  mockGuardianCapabilities = {
+    vpn_filtering: { level: "LIMITED" },
+    web_filtering: { level: "LIMITED" },
+    app_blocking: { level: "FULL" },
+  };
+  act(() => {
+    mockGuardianEventListener?.({ type: "PROTECTION_STATUS_CHANGED" });
+  });
+  await waitFor(() => expect(screen.queryByLabelText("Enable web protection")).toBeNull());
+  screen.unmount();
+  alert.mockRestore();
 });
 
 test("Child home applies app-blocking capability events without polling native state", async () => {

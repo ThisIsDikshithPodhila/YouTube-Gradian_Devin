@@ -58,7 +58,7 @@ export default function ChildPairRoute() {
         clearDeviceCredentials: sessionStorage.clearDeviceIdentity,
         saveDeviceCredentials: sessionStorage.saveDeviceCredentials,
       });
-      router.replace("/child/home");
+      router.replace({ pathname: "/child/home", params: { openYouTube: "true" } });
     } catch (error) { setMessage(error instanceof ApiError ? error.message : `Pairing failed: ${error instanceof Error ? error.message : "check the code and try again."}`); }
   };
   return <ScreenScaffold title="Set up child device"><SectionSurface><PrimaryButton label="Scan QR code" onPress={() => { if (!permission?.granted) void requestPermission().catch(() => setMessage("Camera permission is required to scan the parent code.")); setScanning(true); }} />{scanning && permission?.granted ? <CameraView style={{ height: 220 }} onBarcodeScanned={({ data }) => { setScanning(false); const parsed = parsePairingUri(data); if (parsed) { setSessionId(parsed.sessionId); setCode(parsed.code); setChildId(parsed.childId); } else { setMessage("That QR code is not a Guardian pairing code."); } }} /> : null}<TextField label="Session ID" value={sessionId} onChangeText={setSessionId} /><TextField label="Six-digit code" value={code} onChangeText={setCode} keyboardType="numeric" /><TextField label="Child profile ID" value={childId} onChangeText={setChildId} /><Text accessibilityLiveRegion="polite">{message}</Text><PrimaryButton label="Pair device" onPress={redeem} disabled={!sessionId || code.length !== 6 || !childId} /></SectionSurface></ScreenScaffold>;

@@ -11,6 +11,7 @@ import {
 import { CardSurface, PrimaryButton, ScreenScaffold, SectionSurface, TextField } from "@/design-system";
 
 export default function ChildRequestsRoute() {
+  const limitedChildBuild = process.env.EXPO_PUBLIC_GUARDIAN_LIMITED_CHILD === "true";
   const { isOffline } = useNetworkStatus();
   const [subject, setSubject] = useState("");
   const [reason, setReason] = useState("");
@@ -88,12 +89,14 @@ export default function ChildRequestsRoute() {
       <SectionSurface>
         <Text>Requests can be queued while offline. A queued request unlocks nothing until a parent approves it and that approval reaches this device.</Text>
         {isOffline ? <Text>Offline · queued requests will sync when connectivity returns.</Text> : null}
-        <TextField label="App or website (optional)" value={subject} onChangeText={setSubject} />
+        <TextField label={limitedChildBuild ? "Website (optional)" : "App or website (optional)"} value={subject} onChangeText={setSubject} />
         <TextField label="Note to parent (optional)" value={reason} onChangeText={setReason} />
         {message ? <Text accessibilityLiveRegion="polite">{message}</Text> : null}
         <CardSurface>
-          <PrimaryButton label="Ask for more time" onPress={() => void create("MORE_TIME")} />
-          <PrimaryButton label="Ask to unblock app" disabled={!subject} onPress={() => void create("UNBLOCK_APP")} />
+          {!limitedChildBuild ? <PrimaryButton label="Ask for more time" onPress={() => void create("MORE_TIME")} /> : null}
+          {!limitedChildBuild ? (
+            <PrimaryButton label="Ask to unblock app" disabled={!subject} onPress={() => void create("UNBLOCK_APP")} />
+          ) : null}
           <PrimaryButton label="Ask to unblock site" disabled={!subject} onPress={() => void create("UNBLOCK_SITE")} />
         </CardSurface>
         {outbox.map((item) => (
