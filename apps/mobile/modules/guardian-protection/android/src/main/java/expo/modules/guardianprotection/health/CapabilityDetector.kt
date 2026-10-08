@@ -1,5 +1,6 @@
 package expo.modules.guardianprotection.health
 
+import android.app.Activity
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
@@ -75,11 +76,15 @@ class CapabilityDetector(private val context: Context) {
     )
   }
 
-  fun requestVpnPermission(): Map<String, Any?> {
+  fun requestVpnPermission(activity: Activity?): Map<String, Any?> {
     val intent = VpnService.prepare(context)
     if (intent == null) return mapOf("granted" to true)
-    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    context.startActivity(intent)
+    if (activity != null) {
+      activity.startActivityForResult(intent, VPN_CONSENT_REQUEST_CODE)
+    } else {
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(intent)
+    }
     return mapOf("granted" to false, "reason" to "VPN_CONSENT_REQUIRED")
   }
 
@@ -201,6 +206,10 @@ class CapabilityDetector(private val context: Context) {
     "detail" to detail,
     "updatedAt" to updatedAt,
   )
+
+  companion object {
+    const val VPN_CONSENT_REQUEST_CODE = 0x4756
+  }
 
   private data class VpnCapability(
     val vpnLevel: String,
