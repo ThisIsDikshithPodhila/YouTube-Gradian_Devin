@@ -54,6 +54,8 @@ internal class EncryptedDohTransport(
   private fun query(address: InetAddress, dnsMessage: ByteArray): ByteArray? = runCatching {
     val rawSocket = Socket()
     try {
+      // VpnService.protect needs a socket descriptor, which an unbound java.net.Socket lacks.
+      rawSocket.bind(null)
       check(protectSocket(rawSocket))
       rawSocket.soTimeout = TIMEOUT_MILLIS
       rawSocket.connect(InetSocketAddress(address, endpoint.port), TIMEOUT_MILLIS)
