@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Alert, AppState, Linking, Platform, Text } from "react-native";
+import { Alert, AppState, Platform, Text } from "react-native";
 import { ApiError, api, sessionStorage, type DeviceEvent } from "@/api/client";
 import { useFamilySync } from "@/hooks/use-family-sync";
 import { useNetworkStatus } from "@/state/network";
@@ -229,9 +229,7 @@ export default function ChildHomeRoute() {
         acknowledgedVersion !== policy.data?.policy_version || openedYouTube.current) return;
     openedYouTube.current = true;
     router.setParams({ openYouTube: undefined });
-    void Linking.openURL("https://www.youtube.com/").catch(() => {
-      Alert.alert("YouTube unavailable", "Open YouTube from your home screen or try again later.");
-    });
+    router.push("/child/youtube");
   }, [openYouTube, webProtectionActive, acknowledgedVersion, policy.data?.policy_version, router]);
 
   useEffect(() => {

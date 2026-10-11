@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Image, StyleSheet, Text, View } from "react-native";
+import { BackHandler, Image, StyleSheet, Text, View } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { api, sessionStorage, type VideoCheck } from "@/api/client";
 import { useFamilySync } from "@/hooks/use-family-sync";
 import { PrimaryButton, SecondaryButton } from "@/design-system";
-import { videoIdFromUrl } from "@/state/youtube-video";
+import { isAllowedYouTubeNavigation, videoIdFromUrl } from "@/state/youtube-video";
 
 const YOUTUBE_HOME = "https://m.youtube.com/";
 
@@ -14,17 +14,27 @@ const WATCH_SCRIPT = `
 (function () {
   if (window.__guardianWatch) return;
   window.__guardianWatch = true;
+  if (/(^|\\.)youtube\\.com$/.test(location.hostname) && document.cookie.indexOf("f2=8000000") === -1) {
+    document.cookie = "PREF=f2=8000000; domain=.youtube.com; path=/; max-age=31536000";
+    if (!sessionStorage.getItem("guardianRestricted")) {
+      sessionStorage.setItem("guardianRestricted", "1");
+      location.reload();
+      return;
+    }
+  }
   window.__guardianHold = false;
   var lastHref = "";
+  var videoPage = /\\/(watch|shorts\\/|live\\/|embed\\/)/;
   setInterval(function () {
     if (location.href !== lastHref) {
       lastHref = location.href;
+      if (videoPage.test(location.pathname + "/")) window.__guardianHold = true;
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: "url", href: lastHref }));
     }
     if (window.__guardianHold) {
       document.querySelectorAll("video").forEach(function (video) { if (!video.paused) video.pause(); });
     }
-  }, 300);
+  }, 250);
 })();
 true;
 `;
@@ -40,6 +50,7 @@ export default function ChildYouTubeRoute() {
   const [familyId, setFamilyId] = useState<string>();
   const [gate, setGate] = useState<Gate | null>(null);
   const allowed = useRef(new Set<string>());
+  const canGoBack = useRef(false);
   const currentVideo = useRef<string | null>(null);
 
   useEffect(() => {
@@ -56,6 +67,7 @@ export default function ChildYouTubeRoute() {
   const inspect = useCallback(async (videoId: string) => {
     if (allowed.current.has(videoId)) {
       setGate(null);
+      hold(false);
       return;
     }
     hold(true);
@@ -84,7 +96,10 @@ export default function ChildYouTubeRoute() {
     }
     if (message.type !== "url" || !message.href) return;
     const videoId = videoIdFromUrl(message.href);
-    if (videoId === currentVideo.current) return;
+    if (videoId === currentVideo.current) {
+      if (videoId && allowed.current.has(videoId)) hold(false);
+      return;
+    }
     currentVideo.current = videoId;
     if (videoId) void inspect(videoId);
     else {
@@ -121,6 +136,15 @@ export default function ChildYouTubeRoute() {
     }
   };
 
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (!canGoBack.current) return false;
+      webView.current?.goBack();
+      return true;
+    });
+    return () => subscription.remove();
+  }, []);
+
   const check = gate && "check" in gate ? gate.check : null;
   return (
     <View style={styles.screen}>
@@ -134,6 +158,9 @@ export default function ChildYouTubeRoute() {
         injectedJavaScript={WATCH_SCRIPT}
         onMessage={onMessage}
         onLoadEnd={() => webView.current?.injectJavaScript(WATCH_SCRIPT)}
+        onNavigationStateChange={(state) => { canGoBack.current = state.canGoBack; }}
+        onShouldStartLoadWithRequest={(request) => isAllowedYouTubeNavigation(request.url)}
+        onOpenWindow={() => undefined}
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
         style={styles.web}
