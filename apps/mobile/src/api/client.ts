@@ -61,13 +61,25 @@ export type AccessRequest = {
   id: string;
   child_profile_id: string;
   device_id: string;
-  request_type: "MORE_TIME" | "UNBLOCK_APP" | "UNBLOCK_SITE" | "CONTENT_REVIEW";
+  request_type: "MORE_TIME" | "UNBLOCK_APP" | "UNBLOCK_SITE" | "CONTENT_REVIEW" | "VIDEO_REVIEW";
   subject: string | null;
   state: "PENDING" | "APPROVED" | "DENIED" | "EXPIRED" | "CANCELLED";
   reason: string | null;
   decision_reason: string | null;
   expires_at: string | null;
   content_review?: ContentReviewEvidence | null;
+};
+export type VideoCheck = {
+  video_id: string;
+  title: string | null;
+  channel: string | null;
+  verdict: "ALLOW" | "REVIEW" | "BLOCKED";
+  topic: string | null;
+  request_id: string | null;
+};
+export type VideoRules = {
+  age_band: string;
+  topics: Array<{ code: string; label: string; keywords: string[] }>;
 };
 export type ContentReviewRequestInput = {
   request_type: "CONTENT_REVIEW";
@@ -486,6 +498,18 @@ export class GuardianApiClient {
   }
   requests(familyId: string, childId?: string) {
     return this.request<AccessRequest[]>(`/v1/families/${familyId}/requests${childId ? `?child_id=${encodeURIComponent(childId)}` : ""}`);
+  }
+  deviceRequest(requestId: string) {
+    return this.request<AccessRequest>(`/v1/devices/me/requests/${requestId}`);
+  }
+  checkVideo(videoId: string) {
+    return this.request<VideoCheck>("/v1/devices/me/videos/check", {
+      method: "POST",
+      body: JSON.stringify({ video_id: videoId }),
+    });
+  }
+  videoRules(familyId: string, childId: string) {
+    return this.request<VideoRules>(`/v1/families/${familyId}/children/${childId}/video-rules`);
   }
   contentApprovals() {
     return this.request<ContentApproval[]>("/v1/devices/me/content-approvals");

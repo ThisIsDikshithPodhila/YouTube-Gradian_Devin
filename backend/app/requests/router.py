@@ -83,7 +83,7 @@ async def decide_request(
     row.decision_reason = body.reason
     row.decided_by_parent_id = parent.id
     row.decided_at = datetime.now(UTC)
-    if target is RequestState.APPROVED:
+    if target is RequestState.APPROVED and row.request_type != "VIDEO_REVIEW":
         if row.request_type == "CONTENT_REVIEW":
             evidence = row.content_review
             app_ref = row.content_app_ref

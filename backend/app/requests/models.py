@@ -23,6 +23,7 @@ class RequestType(StrEnum):
     UNBLOCK_APP = "UNBLOCK_APP"
     UNBLOCK_SITE = "UNBLOCK_SITE"
     CONTENT_REVIEW = "CONTENT_REVIEW"
+    VIDEO_REVIEW = "VIDEO_REVIEW"
 
 
 class Request(TimestampMixin, Base):

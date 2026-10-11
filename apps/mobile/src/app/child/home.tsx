@@ -523,6 +523,7 @@ export default function ChildHomeRoute() {
                 )}
               />
             ) : null}
+            <PrimaryButton label="Watch YouTube safely" onPress={() => router.push("/child/youtube")} />
             <PrimaryButton label="My time" onPress={() => router.push("/child/time")} />
             <PrimaryButton label="My simple rules" onPress={() => router.push("/child/rules-summary")} />
             {!limitedChildBuild && timeMessage?.includes("expired") ? <PrimaryButton label="Open time-up" onPress={() => router.push("/child/time-up")} /> : null}

@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Text } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { VideoReviewAlerts } from "@/components/video-review-alerts";
 import { api } from "@/api/client";
 import { useSession } from "@/auth/session";
 import { useNetworkStatus } from "@/state/network";
@@ -125,6 +126,9 @@ export default function ParentHomeRoute() {
             />
           ))}
         </SectionSurface>
+        {selectedChild && activeFamilyId ? (
+          <VideoReviewAlerts familyId={activeFamilyId} childId={selectedChild.id} childName={selectedChild.name} />
+        ) : null}
         {selectedChild ? (
           <ResponsiveColumns>
             <CardSurface>

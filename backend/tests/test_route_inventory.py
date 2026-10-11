@@ -28,6 +28,8 @@ EXPECTED_ROUTES: tuple[ExpectedRoute, ...] = (
     ("/v1/devices/me/policy", "GET", "device"),
     ("/v1/devices/me/policy/ack", "POST", "device"),
     ("/v1/devices/me/reputation", "GET", "device"),
+    ("/v1/devices/me/requests/{request_id}", "GET", "device"),
+    ("/v1/devices/me/videos/check", "POST", "device"),
     ("/v1/devices/me/reputation/classify", "POST", "device"),
     ("/v1/devices/me/push-tokens", "POST", "device"),
     ("/v1/devices/me/requests", "POST", "device"),
@@ -43,6 +45,7 @@ EXPECTED_ROUTES: tuple[ExpectedRoute, ...] = (
     ("/v1/families/{family_id}/children/{child_id}", "DELETE", "parent"),
     ("/v1/families/{family_id}/children/{child_id}", "GET", "parent"),
     ("/v1/families/{family_id}/children/{child_id}", "PATCH", "parent"),
+    ("/v1/families/{family_id}/children/{child_id}/video-rules", "GET", "parent"),
     (
         "/v1/families/{family_id}/children/{child_id}/pairing",
         "POST",
