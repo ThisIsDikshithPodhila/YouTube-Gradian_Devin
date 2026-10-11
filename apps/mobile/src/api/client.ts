@@ -21,7 +21,7 @@ export type Guardian = { id: string; family_id: string; parent_id: string; role:
 export type Child = { id: string; family_id: string; name: string; date_of_birth: string; age_band: string; timezone: string; policy_document?: unknown };
 export type Pairing = { session_id: string; code: string; qr_payload: string; expires_at: string };
 export type DeviceCredentials = { device_id: string; device_token: string; family_id: string };
-export type Health = { child_profile_id: string; device_id: string; state: "PROTECTED" | "DEGRADED" | "UNKNOWN"; last_seen_at: string | null; policy_version_applied: number | null };
+export type Health = { child_profile_id: string; device_id: string; state: "HEALTHY" | "PROTECTED" | "DEGRADED" | "DISABLED" | "UNKNOWN"; last_seen_at: string | null; policy_version_applied: number | null };
 export type PolicyMutationInput = {
   operation:
     | "APP_ALLOW"
