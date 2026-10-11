@@ -104,7 +104,12 @@ async def fetch_video_metadata(video_id: str) -> VideoMetadata | None:
         return None
     if response.status_code != 200:
         return None
-    body = response.json()
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    if not isinstance(body, dict):
+        return None
     title = body.get("title")
     channel = body.get("author_name")
     return VideoMetadata(

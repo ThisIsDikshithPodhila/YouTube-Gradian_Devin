@@ -111,6 +111,12 @@ export default function ParentHomeRoute() {
           <PrimaryButton label="Add a child" onPress={() => router.push({ pathname: "/parent/setup", params: { familyId: activeFamilyId } })} />
         </SectionSurface>
       ) : null}
+      {activeFamilyId ? (
+        <VideoReviewAlerts
+          familyId={activeFamilyId}
+          childNames={Object.fromEntries((children.data ?? []).map((child) => [child.id, child.name]))}
+        />
+      ) : null}
       <DataState state={state} onRetry={() => { void children.refetch(); void health.refetch(); void inventory.refetch(); }}>
         <SectionSurface>
           <Text>Children</Text>
@@ -126,9 +132,6 @@ export default function ParentHomeRoute() {
             />
           ))}
         </SectionSurface>
-        {selectedChild && activeFamilyId ? (
-          <VideoReviewAlerts familyId={activeFamilyId} childId={selectedChild.id} childName={selectedChild.name} />
-        ) : null}
         {selectedChild ? (
           <ResponsiveColumns>
             <CardSurface>

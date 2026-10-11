@@ -5,6 +5,7 @@ describe("videoIdFromUrl", () => {
     expect(videoIdFromUrl("https://m.youtube.com/watch?v=dQw4w9WgXcQ&pp=abc")).toBe("dQw4w9WgXcQ");
     expect(videoIdFromUrl("https://www.youtube.com/shorts/abcdefghijk")).toBe("abcdefghijk");
     expect(videoIdFromUrl("https://youtu.be/abcdefghijk")).toBe("abcdefghijk");
+    expect(videoIdFromUrl("https://music.youtube.com/watch?v=abcdefghijk")).toBe("abcdefghijk");
   });
 
   it("ignores non-video YouTube pages and other hosts", () => {
@@ -28,5 +29,8 @@ describe("isAllowedYouTubeNavigation", () => {
     expect(isAllowedYouTubeNavigation("https://www.audiusa.com/")).toBe(false);
     expect(isAllowedYouTubeNavigation("https://www.google.com/search?q=x")).toBe(false);
     expect(isAllowedYouTubeNavigation("https://notyoutube.com/")).toBe(false);
+    expect(isAllowedYouTubeNavigation("http://m.youtube.com/watch?v=abcdefghijk")).toBe(false);
+    expect(isAllowedYouTubeNavigation("data:text/html,<video>")).toBe(false);
+    expect(isAllowedYouTubeNavigation("blob:https://m.youtube.com/abc")).toBe(false);
   });
 });

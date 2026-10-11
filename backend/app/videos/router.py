@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.handler_support import (
@@ -80,6 +80,10 @@ async def check_video(
     if metadata is not None and topic is None:
         return VideoCheckOut(video_id=body.video_id, title=shown.title, channel=shown.channel, verdict="ALLOW", topic=None, request_id=None)
     topic_label = topic.label if topic else UNVERIFIED_LABEL
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+        {"lock_key": f"video-review:{device.id}:{body.video_id}"},
+    )
     now = datetime.now(UTC)
     previous = await session.scalar(
         select(RequestRow)
@@ -96,8 +100,9 @@ async def check_video(
             return VideoCheckOut(video_id=body.video_id, title=shown.title, channel=shown.channel, verdict="ALLOW", topic=topic_label, request_id=previous.id)
         if previous.state == RequestState.DENIED.value:
             return VideoCheckOut(video_id=body.video_id, title=shown.title, channel=shown.channel, verdict="BLOCKED", topic=topic_label, request_id=previous.id)
-        if previous.state == RequestState.PENDING.value and (previous.expires_at is None or previous.expires_at > now):
-            return VideoCheckOut(video_id=body.video_id, title=shown.title, channel=shown.channel, verdict="REVIEW", topic=topic_label, request_id=previous.id)
+        if previous.state == RequestState.PENDING.value:
+            if not _expire_if_due(previous, now):
+                return VideoCheckOut(video_id=body.video_id, title=shown.title, channel=shown.channel, verdict="REVIEW", topic=topic_label, request_id=previous.id)
     row = RequestRow(
         child_profile_id=device.child_profile_id,
         device_id=device.id,
@@ -126,7 +131,17 @@ async def device_request(
     )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Request not found")
+    if _expire_if_due(row, datetime.now(UTC)):
+        await session.commit()
+        await session.refresh(row)
     return RequestOut.model_validate(row)
+
+
+def _expire_if_due(row: RequestRow, now: datetime) -> bool:
+    if row.state != RequestState.PENDING.value or row.expires_at is None or row.expires_at > now:
+        return False
+    row.state = RequestState.EXPIRED.value
+    return True
 
 
 async def video_rules(

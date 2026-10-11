@@ -10,6 +10,26 @@ import { isAllowedYouTubeNavigation, videoIdFromUrl } from "@/state/youtube-vide
 
 const YOUTUBE_HOME = "https://m.youtube.com/";
 
+const PLAY_GATE_SCRIPT = `
+(function () {
+  if (window.__guardianGate) return;
+  window.__guardianGate = true;
+  window.__guardianAllowed = window.__guardianAllowed || {};
+  function currentId() {
+    var match = /[?&]v=([A-Za-z0-9_-]{11})/.exec(location.search)
+      || /\\/(?:shorts|live|embed)\\/([A-Za-z0-9_-]{11})/.exec(location.pathname)
+      || (/(^|\\.)youtu\\.be$/.test(location.hostname) ? /^\\/([A-Za-z0-9_-]{11})/.exec(location.pathname) : null);
+    return match ? match[1] : null;
+  }
+  document.addEventListener("play", function (event) {
+    var id = currentId();
+    if (id && !window.__guardianAllowed[id]) window.__guardianHold = true;
+    if (window.__guardianHold && event.target && event.target.pause) event.target.pause();
+  }, true);
+})();
+true;
+`;
+
 const WATCH_SCRIPT = `
 (function () {
   if (window.__guardianWatch) return;
@@ -58,16 +78,17 @@ export default function ChildYouTubeRoute() {
   }, []);
   useFamilySync(familyId, "child");
 
-  const hold = useCallback((held: boolean) => {
+  const hold = useCallback((held: boolean, allowVideoId?: string) => {
+    const allow = allowVideoId ? `(window.__guardianAllowed = window.__guardianAllowed || {})[${JSON.stringify(allowVideoId)}] = true;` : "";
     webView.current?.injectJavaScript(
-      `window.__guardianHold = ${held}; ${held ? "" : 'var v = document.querySelector("video"); if (v) v.play();'} true;`,
+      `${allow} window.__guardianHold = ${held}; ${held ? "" : 'var v = document.querySelector("video"); if (v) v.play();'} true;`,
     );
   }, []);
 
   const inspect = useCallback(async (videoId: string) => {
     if (allowed.current.has(videoId)) {
       setGate(null);
-      hold(false);
+      hold(false, videoId);
       return;
     }
     hold(true);
@@ -78,7 +99,7 @@ export default function ChildYouTubeRoute() {
       if (check.verdict === "ALLOW") {
         allowed.current.add(videoId);
         setGate(null);
-        hold(false);
+        hold(false, videoId);
       } else {
         setGate({ videoId, status: check.verdict === "BLOCKED" ? "blocked" : "review", check });
       }
@@ -97,7 +118,7 @@ export default function ChildYouTubeRoute() {
     if (message.type !== "url" || !message.href) return;
     const videoId = videoIdFromUrl(message.href);
     if (videoId === currentVideo.current) {
-      if (videoId && allowed.current.has(videoId)) hold(false);
+      if (videoId && allowed.current.has(videoId)) hold(false, videoId);
       return;
     }
     currentVideo.current = videoId;
@@ -157,7 +178,8 @@ export default function ChildYouTubeRoute() {
         source={{ uri: YOUTUBE_HOME }}
         injectedJavaScript={WATCH_SCRIPT}
         onMessage={onMessage}
-        onLoadEnd={() => webView.current?.injectJavaScript(WATCH_SCRIPT)}
+        injectedJavaScriptBeforeContentLoaded={PLAY_GATE_SCRIPT}
+        onLoadEnd={() => webView.current?.injectJavaScript(PLAY_GATE_SCRIPT + WATCH_SCRIPT)}
         onNavigationStateChange={(state) => { canGoBack.current = state.canGoBack; }}
         onShouldStartLoadWithRequest={(request) => isAllowedYouTubeNavigation(request.url)}
         onOpenWindow={() => undefined}
@@ -182,7 +204,7 @@ export default function ChildYouTubeRoute() {
             {gate.status === "approved" ? (
               <>
                 <Text style={styles.ok}>Your parent approved this video.</Text>
-                <PrimaryButton label="Watch now" onPress={() => { setGate(null); hold(false); }} />
+                <PrimaryButton label="Watch now" onPress={() => { setGate(null); hold(false, gate.videoId); }} />
               </>
             ) : null}
             {gate.status === "blocked" ? (
