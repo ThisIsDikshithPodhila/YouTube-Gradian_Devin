@@ -32,6 +32,8 @@ export function useFamilySync(
       queryClient.invalidateQueries({ queryKey: ["activity-usage", familyId] }),
       queryClient.invalidateQueries({ queryKey: ["device-policy"] }),
       queryClient.invalidateQueries({ queryKey: ["device-request"] }),
+      queryClient.invalidateQueries({ queryKey: ["device-video-settings"] }),
+      queryClient.invalidateQueries({ queryKey: ["video-rules", familyId] }),
     ]).catch(() => undefined);
 
     const stopPolling = () => {

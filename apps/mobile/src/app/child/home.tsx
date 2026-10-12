@@ -94,6 +94,7 @@ export default function ChildHomeRoute() {
   const [reputationMessage, setReputationMessage] = useState<string | null>(null);
   const [acknowledgedVersion, setAcknowledgedVersion] = useState<number | null>(null);
   const [webProtectionActive, setWebProtectionActive] = useState(false);
+  const [sosMessage, setSosMessage] = useState<string | null>(null);
   const openedYouTube = useRef(false);
   const usageUploaded = useRef(false);
   const inventoryUploaded = useRef(false);
@@ -526,6 +527,13 @@ export default function ChildHomeRoute() {
             <PrimaryButton label="My simple rules" onPress={() => router.push("/child/rules-summary")} />
             {!limitedChildBuild && timeMessage?.includes("expired") ? <PrimaryButton label="Open time-up" onPress={() => router.push("/child/time-up")} /> : null}
             <PrimaryButton label="Ask for help" onPress={() => router.push("/child/requests")} />
+            <SecondaryButton label="I saw something scary" disabled={sosMessage === "Telling your parent…"} onPress={() => {
+              setSosMessage("Telling your parent…");
+              api.sendSos("SCARY_CONTENT")
+                .then(() => setSosMessage("We told your parent. You did the right thing."))
+                .catch(() => setSosMessage("Guardian couldn't reach your parent. Please find a grown-up nearby."));
+            }} />
+            {sosMessage ? <Text accessibilityLiveRegion="assertive">{sosMessage}</Text> : null}
           </SectionSurface>
         </DataState>
       )}
