@@ -1,8 +1,9 @@
 import { act, render, waitFor } from "@testing-library/react-native";
-import { Alert, AppState, Linking, type AppStateStatus } from "react-native";
+import { AppState, type AppStateStatus } from "react-native";
 import ChildHomeRoute from "@/app/child/home";
 
 const mockSetParams = jest.fn();
+const mockPush = jest.fn();
 const mockAcknowledgePolicy = jest.fn<Promise<void>, [number]>();
 const mockGetCapabilities = jest.fn<Promise<unknown>, []>();
 const mockGetProtectionStatus = jest.fn<Promise<unknown>, []>();
@@ -14,7 +15,7 @@ jest.mock("react-native-safe-area-context", () => ({
 }));
 
 jest.mock("expo-router", () => ({
-  useRouter: () => ({ replace: jest.fn(), push: jest.fn(), setParams: mockSetParams }),
+  useRouter: () => ({ replace: jest.fn(), push: mockPush, setParams: mockSetParams }),
   useLocalSearchParams: () => ({ openYouTube: "true" }),
 }));
 
@@ -58,16 +59,14 @@ jest.mock("../modules/guardian-protection/src", () => ({
   },
 }));
 
-test.each([false, true])("paired Child opens YouTube once after protection (unavailable: %s)", async (unavailable) => {
+test("paired Child opens Guardian YouTube once after protection", async () => {
   let vpnReady = false;
   const listeners: Array<(state: AppStateStatus) => void> = [];
   const appState = jest.spyOn(AppState, "addEventListener").mockImplementation((_event, listener) => {
     listeners.push(listener);
     return { remove: jest.fn() };
   });
-  const openURL = jest.spyOn(Linking, "openURL").mockResolvedValue(true);
-  if (unavailable) openURL.mockRejectedValue(new Error("No handler"));
-  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+  mockPush.mockClear();
   mockSetParams.mockClear();
   mockAcknowledgePolicy.mockReset().mockResolvedValue(undefined);
   mockApplyPolicyBundle.mockReset().mockResolvedValue({ applied: true });
@@ -83,7 +82,7 @@ test.each([false, true])("paired Child opens YouTube once after protection (unav
   await act(async () => { await new Promise<void>((resolve) => setImmediate(resolve)); });
   expect(screen.getByText("Policy version: 11")).toBeTruthy();
   await waitFor(() => expect(screen.getByText("YouTube will open after web protection is active.")).toBeTruthy());
-  expect(openURL).not.toHaveBeenCalled();
+  expect(mockPush).not.toHaveBeenCalled();
   expect(mockAcknowledgePolicy).not.toHaveBeenCalled();
   expect(mockApplyPolicyBundle).toHaveBeenCalledTimes(1);
   expect(listeners).toHaveLength(2);
@@ -95,25 +94,16 @@ test.each([false, true])("paired Child opens YouTube once after protection (unav
   });
   expect(mockApplyPolicyBundle).toHaveBeenCalledTimes(2);
   await waitFor(() => expect(mockAcknowledgePolicy).toHaveBeenCalledWith(11));
-  await waitFor(() => expect(openURL).toHaveBeenCalledWith("https://www.youtube.com/"));
-  expect(openURL).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/child/youtube"));
+  expect(mockPush).toHaveBeenCalledTimes(1);
   expect(mockSetParams).toHaveBeenCalledWith({ openYouTube: undefined });
-  if (unavailable) {
-    await waitFor(() => expect(alert).toHaveBeenCalledWith(
-      "YouTube unavailable", "Open YouTube from your home screen or try again later.",
-    ));
-  } else {
-    expect(alert).not.toHaveBeenCalled();
-  }
 
   await act(async () => {
     listeners.forEach((listener) => listener("active"));
     await new Promise<void>((resolve) => setImmediate(resolve));
   });
   await waitFor(() => expect(mockAcknowledgePolicy).toHaveBeenCalledTimes(2));
-  expect(openURL).toHaveBeenCalledTimes(1);
+  expect(mockPush).toHaveBeenCalledTimes(1);
   screen.unmount();
   appState.mockRestore();
-  openURL.mockRestore();
-  alert.mockRestore();
 });

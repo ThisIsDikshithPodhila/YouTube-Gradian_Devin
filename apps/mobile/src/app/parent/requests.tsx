@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Text } from "react-native";
+import { Image, Text } from "react-native";
+import { parseVideoReview } from "@/components/video-review-alerts";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type AccessRequest } from "@/api/client";
@@ -35,7 +36,12 @@ export default function ParentRequestsRoute() {
           {requests.data?.map((request) => (
             <CardSurface key={request.id}>
               <ListRow label={request.request_type} value={stateLabel(request)} />
-              <Text>{request.subject ?? "No target"} · {request.reason ?? "No child note"}</Text>
+              {request.request_type === "VIDEO_REVIEW" ? (
+                <>
+                  {parseVideoReview(request).videoId ? <Image source={{ uri: `https://i.ytimg.com/vi/${parseVideoReview(request).videoId}/hqdefault.jpg` }} style={{ width: "100%", aspectRatio: 16 / 9 }} /> : null}
+                  <Text>{parseVideoReview(request).title} · {parseVideoReview(request).topic}</Text>
+                </>
+              ) : <Text>{request.subject ?? "No target"} · {request.reason ?? "No child note"}</Text>}
               <PrimaryButton label="Open request detail" onPress={() => router.push({ pathname: "/parent/request-detail", params: { familyId, childId, requestId: request.id } })} />
               {request.state === "PENDING" ? (
                 <>

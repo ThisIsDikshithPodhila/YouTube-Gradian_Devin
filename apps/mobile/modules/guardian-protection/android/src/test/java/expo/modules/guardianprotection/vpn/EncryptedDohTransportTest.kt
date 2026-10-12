@@ -48,4 +48,21 @@ class EncryptedDohTransportTest {
     assertTrue(headers.any { it == '\n'.code.toByte() })
     assertFalse(text.contains("?dns="))
   }
+
+  @Test
+  fun protectsABoundSocketSoTheVpnCanExcludeItsDescriptor() {
+    val endpoint = requireNotNull(DohEndpoint.parse("https://resolver.example/dns-query"))
+    var protectedSocketWasBound: Boolean? = null
+    val transport = EncryptedDohTransport(
+      endpoint,
+      listOf(InetAddress.getLoopbackAddress()),
+      protectSocket = { socket ->
+        protectedSocketWasBound = socket.isBound
+        false
+      },
+    )
+
+    assertNull(transport.query(byteArrayOf(0, 1)))
+    assertEquals(true, protectedSocketWasBound)
+  }
 }

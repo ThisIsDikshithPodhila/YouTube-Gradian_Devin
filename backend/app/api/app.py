@@ -20,6 +20,7 @@ from ..policies.router import router as policies_router
 from ..push.router import router as push_router
 from ..reputation.router import router as reputation_router
 from ..requests.router import router as requests_router
+from ..videos.router import router as videos_router
 from .handler_support import notifier
 from .lifecycle import lifespan
 
@@ -84,6 +85,7 @@ for router in (
     requests_router,
     push_router,
     reputation_router,
+    videos_router,
 ):
     app.include_router(router)
 __all__ = ["app", "notifier"]

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Alert, AppState, Linking, Platform, Text } from "react-native";
+import { Alert, AppState, Platform, Text } from "react-native";
 import { ApiError, api, sessionStorage, type DeviceEvent } from "@/api/client";
 import { useFamilySync } from "@/hooks/use-family-sync";
 import { useNetworkStatus } from "@/state/network";
@@ -94,6 +94,7 @@ export default function ChildHomeRoute() {
   const [reputationMessage, setReputationMessage] = useState<string | null>(null);
   const [acknowledgedVersion, setAcknowledgedVersion] = useState<number | null>(null);
   const [webProtectionActive, setWebProtectionActive] = useState(false);
+  const [sosMessage, setSosMessage] = useState<string | null>(null);
   const openedYouTube = useRef(false);
   const usageUploaded = useRef(false);
   const inventoryUploaded = useRef(false);
@@ -229,9 +230,7 @@ export default function ChildHomeRoute() {
         acknowledgedVersion !== policy.data?.policy_version || openedYouTube.current) return;
     openedYouTube.current = true;
     router.setParams({ openYouTube: undefined });
-    void Linking.openURL("https://www.youtube.com/").catch(() => {
-      Alert.alert("YouTube unavailable", "Open YouTube from your home screen or try again later.");
-    });
+    router.push("/child/youtube");
   }, [openYouTube, webProtectionActive, acknowledgedVersion, policy.data?.policy_version, router]);
 
   useEffect(() => {
@@ -523,10 +522,18 @@ export default function ChildHomeRoute() {
                 )}
               />
             ) : null}
+            <PrimaryButton label="Watch YouTube safely" onPress={() => router.push("/child/youtube")} />
             <PrimaryButton label="My time" onPress={() => router.push("/child/time")} />
             <PrimaryButton label="My simple rules" onPress={() => router.push("/child/rules-summary")} />
             {!limitedChildBuild && timeMessage?.includes("expired") ? <PrimaryButton label="Open time-up" onPress={() => router.push("/child/time-up")} /> : null}
             <PrimaryButton label="Ask for help" onPress={() => router.push("/child/requests")} />
+            <SecondaryButton label="I saw something scary" disabled={sosMessage === "Telling your parent…"} onPress={() => {
+              setSosMessage("Telling your parent…");
+              api.sendSos("SCARY_CONTENT")
+                .then(() => setSosMessage("We told your parent. You did the right thing."))
+                .catch(() => setSosMessage("Guardian couldn't reach your parent. Please find a grown-up nearby."));
+            }} />
+            {sosMessage ? <Text accessibilityLiveRegion="assertive">{sosMessage}</Text> : null}
           </SectionSurface>
         </DataState>
       )}

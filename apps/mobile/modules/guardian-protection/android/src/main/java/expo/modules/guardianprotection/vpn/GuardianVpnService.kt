@@ -274,6 +274,8 @@ class GuardianVpnService : VpnService() {
         .setMtu(1500)
         .addAddress("10.0.0.2", 32)
         .addAddress("fd00:0:0:0:0:0:0:2", 128)
+      runCatching { builder.addDisallowedApplication(packageName) }
+        .onFailure { failOnce("SELF_EXCLUSION_CONFIGURATION_FAILED") }
       dnsServers.ifEmpty { listOf(InetAddress.getByName("10.0.0.1")) }.forEach { dns ->
         runCatching {
           builder.addDnsServer(dns)

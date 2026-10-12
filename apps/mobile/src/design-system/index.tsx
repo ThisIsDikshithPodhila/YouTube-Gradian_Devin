@@ -198,9 +198,17 @@ export function TextField({
   );
 }
 
-export function ProtectionStatePill({ state }: { state: "PROTECTED" | "DEGRADED" | "UNKNOWN" }) {
+const protectionTone: Record<string, keyof typeof protectionStateColors> = {
+  HEALTHY: "PROTECTED",
+  PROTECTED: "PROTECTED",
+  DEGRADED: "DEGRADED",
+  DISABLED: "DEGRADED",
+  UNKNOWN: "UNKNOWN",
+};
+
+export function ProtectionStatePill({ state }: { state: string }) {
   const palette = usePalette();
-  const color = protectionStateColors[state].light;
+  const color = protectionStateColors[protectionTone[state] ?? "UNKNOWN"].light;
   return (
     <View
       accessible
