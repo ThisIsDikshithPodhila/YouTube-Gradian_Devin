@@ -18,6 +18,7 @@ from app.policies import models as policy_models  # noqa: F401
 from app.push import models as push_models  # noqa: F401
 from app.reputation import models as reputation_models  # noqa: F401
 from app.requests import models as request_models  # noqa: F401
+from app.videos import models as video_models  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url)

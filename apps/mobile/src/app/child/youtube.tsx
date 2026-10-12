@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BackHandler, Image, StyleSheet, Text, View } from "react-native";
+import { BackHandler, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import { api, sessionStorage, type VideoCheck } from "@/api/client";
+import { api, sessionStorage, type DeviceVideoSettings, type VideoCheck } from "@/api/client";
 import { useFamilySync } from "@/hooks/use-family-sync";
 import { PrimaryButton, SecondaryButton } from "@/design-system";
 import { isAllowedYouTubeNavigation, videoIdFromUrl } from "@/state/youtube-video";
@@ -59,6 +59,55 @@ const WATCH_SCRIPT = `
 true;
 `;
 
+const RESTRICT_SCRIPT = `
+(function () {
+  if (window.__guardianRestrict) return;
+  window.__guardianRestrict = true;
+  var style = document.createElement("style");
+  style.id = "guardian-restrict";
+  (document.head || document.documentElement).appendChild(style);
+  var lastVideoPage = false;
+  var endedAt = 0;
+  var touchedAt = 0;
+  document.addEventListener("ended", function () { endedAt = Date.now(); }, true);
+  document.addEventListener("touchstart", function () { touchedAt = Date.now(); }, true);
+  document.addEventListener("click", function () { touchedAt = Date.now(); }, true);
+  function apply() {
+    var s = window.__guardianSettings || { hide_shorts: true, hide_comments: true, autoplay_next: false };
+    var css = "";
+    if (s.hide_comments) css += "ytm-comment-section-renderer, ytm-comments-entry-point-header-renderer, ytm-comments-entry-point-teaser-renderer, ytm-item-section-renderer[section-identifier='comment-item-section'], #comments, ytm-engagement-panel-section-list-renderer[target-id*='comment'] { display: none !important; }";
+    if (s.hide_shorts) css += "ytm-reel-shelf-renderer, ytm-shorts-lockup-view-model, ytm-shorts-lockup-view-model-v2, ytm-reel-item-renderer, ytm-pivot-bar-item-renderer:has(.pivot-shorts), ytm-pivot-bar-item-renderer:has(a[href^='/shorts']), ytm-rich-item-renderer:has(a[href^='/shorts']), ytm-rich-section-renderer:has(a[href^='/shorts']), grid-shelf-view-model:has(a[href^='/shorts']), ytm-chip-cloud-chip-renderer:has(a[href^='/shorts']) { display: none !important; }";
+    if (!s.autoplay_next) css += ".ytm-autonav-toggle-button-container, ytm-autonav-toggle-button-renderer, .ytp-autonav-endscreen-countdown-overlay, .ytm-autonav-endscreen { display: none !important; }";
+    if (style.textContent !== css) style.textContent = css;
+    if (s.hide_shorts && /^\\/shorts(\\/|$)/.test(location.pathname)) {
+      var id = /^\\/shorts\\/([A-Za-z0-9_-]{11})/.exec(location.pathname);
+      location.replace(id ? "/watch?v=" + id[1] : "/");
+      return;
+    }
+    var videoPage = location.pathname === "/watch";
+    if (!s.autoplay_next && videoPage && window.__guardianLastHref && window.__guardianLastHref !== location.href && lastVideoPage && endedAt && Date.now() - endedAt < 20000 && touchedAt < endedAt) {
+      endedAt = 0;
+      document.querySelectorAll("video").forEach(function (video) { video.pause(); });
+      history.back();
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: "autoplay-stopped" }));
+    }
+    lastVideoPage = videoPage;
+    window.__guardianLastHref = location.href;
+  }
+  setInterval(apply, 300);
+  apply();
+})();
+true;
+`;
+
+function settingsScript(settings: DeviceVideoSettings | undefined) {
+  if (!settings) return "true;";
+  const value = JSON.stringify({ hide_shorts: settings.hide_shorts, hide_comments: settings.hide_comments, autoplay_next: settings.autoplay_next });
+  return `window.__guardianSettings = ${value}; true;`;
+}
+
+type Sos = { status: "sending" } | { status: "sent"; requestId: string } | { status: "failed" };
+
 type Gate =
   | { videoId: string; status: "checking" }
   | { videoId: string; status: "review" | "blocked" | "approved"; check: VideoCheck }
@@ -72,6 +121,13 @@ export default function ChildYouTubeRoute() {
   const allowed = useRef(new Set<string>());
   const canGoBack = useRef(false);
   const currentVideo = useRef<string | null>(null);
+  const [sos, setSos] = useState<Sos | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const settings = useQuery({ queryKey: ["device-video-settings"], queryFn: () => api.deviceVideoSettings(), refetchInterval: 30_000 });
+  const settingsJs = settingsScript(settings.data);
+  useEffect(() => {
+    webView.current?.injectJavaScript(settingsJs);
+  }, [settingsJs]);
 
   useEffect(() => {
     void sessionStorage.getFamilyId().then((value) => setFamilyId(value ?? undefined)).catch(() => undefined);
@@ -113,6 +169,10 @@ export default function ChildYouTubeRoute() {
     try {
       message = JSON.parse(event.nativeEvent.data) as { type?: string; href?: string };
     } catch {
+      return;
+    }
+    if (message.type === "autoplay-stopped") {
+      setNotice("Autoplay is off. Pick your next video yourself.");
       return;
     }
     if (message.type !== "url" || !message.href) return;
@@ -166,11 +226,55 @@ export default function ChildYouTubeRoute() {
     return () => subscription.remove();
   }, []);
 
+  const sosRequestId = sos?.status === "sent" ? sos.requestId : null;
+  const sosState = useQuery({
+    queryKey: ["device-request", sosRequestId],
+    queryFn: () => api.deviceRequest(sosRequestId as string),
+    enabled: Boolean(sosRequestId),
+    refetchInterval: 3_000,
+  });
+  const sendSos = async () => {
+    hold(true);
+    setSos({ status: "sending" });
+    try {
+      const sent = await api.sendSos("SCARY_CONTENT", currentVideo.current);
+      setSos({ status: "sent", requestId: sent.id });
+    } catch {
+      setSos({ status: "failed" });
+    }
+  };
+  const open = (url: string) => {
+    setNotice(null);
+    webView.current?.injectJavaScript(`location.href = ${JSON.stringify(url)}; true;`);
+  };
+  const learn = settings.data;
+
   const check = gate && "check" in gate ? gate.check : null;
   return (
     <View style={styles.screen}>
       <View style={styles.toolbar}>
-        <Text style={styles.brand}>Guardian · YouTube</Text>
+        <View style={styles.toolbarRow}>
+          <Text style={styles.brand}>Guardian · YouTube</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="I saw something scary" onPress={() => void sendSos()} style={styles.sos}>
+            <Text style={styles.sosText}>I saw something scary</Text>
+          </Pressable>
+        </View>
+        {learn ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+            <Text style={styles.chipsLabel}>Watch & learn</Text>
+            {learn.picks.map((pick) => (
+              <Pressable key={pick.video_id} accessibilityRole="button" accessibilityLabel={`Parent pick: ${pick.title ?? pick.video_id}`} onPress={() => open(`https://m.youtube.com/watch?v=${pick.video_id}`)} style={[styles.chip, styles.pick]}>
+                <Text style={styles.chipText} numberOfLines={1}>★ {pick.title ?? "Parent pick"}</Text>
+              </Pressable>
+            ))}
+            {learn.learning_topics.map((topic) => (
+              <Pressable key={topic.label} accessibilityRole="button" accessibilityLabel={`Learn: ${topic.label}`} onPress={() => open(`https://m.youtube.com/results?search_query=${encodeURIComponent(topic.keywords)}`)} style={styles.chip}>
+                <Text style={styles.chipText} numberOfLines={1}>{topic.label}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : null}
+        {notice ? <Text style={styles.notice}>{notice}</Text> : null}
         <SecondaryButton label="Back to My time" onPress={() => router.back()} />
       </View>
       <WebView
@@ -178,8 +282,8 @@ export default function ChildYouTubeRoute() {
         source={{ uri: YOUTUBE_HOME }}
         injectedJavaScript={WATCH_SCRIPT}
         onMessage={onMessage}
-        injectedJavaScriptBeforeContentLoaded={PLAY_GATE_SCRIPT}
-        onLoadEnd={() => webView.current?.injectJavaScript(PLAY_GATE_SCRIPT + WATCH_SCRIPT)}
+        injectedJavaScriptBeforeContentLoaded={settingsJs + PLAY_GATE_SCRIPT + RESTRICT_SCRIPT}
+        onLoadEnd={() => webView.current?.injectJavaScript(settingsJs + PLAY_GATE_SCRIPT + RESTRICT_SCRIPT + WATCH_SCRIPT)}
         onNavigationStateChange={(state) => { canGoBack.current = state.canGoBack; }}
         onShouldStartLoadWithRequest={(request) => isAllowedYouTubeNavigation(request.url)}
         onOpenWindow={() => undefined}
@@ -223,6 +327,28 @@ export default function ChildYouTubeRoute() {
           </View>
         </View>
       ) : null}
+      {sos ? (
+        <View style={styles.overlay} accessibilityLiveRegion="assertive">
+          <View style={styles.card}>
+            {sos.status === "sending" ? <Text style={styles.title}>Telling your parent…</Text> : null}
+            {sos.status === "sent" ? (
+              <>
+                <Text style={styles.title}>You did the right thing.</Text>
+                <Text style={styles.body}>
+                  {sosState.data?.state === "APPROVED"
+                    ? `Your parent saw your message${sosState.data.decision_reason ? `: “${sosState.data.decision_reason}”` : "."}`
+                    : "We told your parent you saw something scary. The video is paused."}
+                </Text>
+              </>
+            ) : null}
+            {sos.status === "failed" ? (
+              <Text style={styles.body}>Guardian couldn't reach your parent right now. Please go and find a grown-up nearby.</Text>
+            ) : null}
+            {sos.status === "failed" ? <PrimaryButton label="Try again" onPress={() => void sendSos()} /> : null}
+            <PrimaryButton label="Leave this video" onPress={() => { setSos(null); leaveVideo(); }} />
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -230,7 +356,16 @@ export default function ChildYouTubeRoute() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#0b1530" },
   toolbar: { paddingTop: 40, paddingHorizontal: 12, paddingBottom: 6, gap: 6 },
+  toolbarRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   brand: { color: "white", fontSize: 18, fontWeight: "700" },
+  sos: { backgroundColor: "#d92d20", borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  sosText: { color: "white", fontWeight: "800", fontSize: 14 },
+  chips: { gap: 8, alignItems: "center", paddingVertical: 2 },
+  chipsLabel: { color: "#9fb3ff", fontWeight: "700", fontSize: 13 },
+  chip: { backgroundColor: "#1d2b55", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, maxWidth: 220 },
+  pick: { backgroundColor: "#2b4fd6" },
+  chipText: { color: "white", fontSize: 13, fontWeight: "600" },
+  notice: { color: "#fedf89", fontSize: 13 },
   web: { flex: 1 },
   overlay: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(11,21,48,0.92)", justifyContent: "center", padding: 20 },
   card: { backgroundColor: "white", borderRadius: 16, padding: 16, gap: 10 },

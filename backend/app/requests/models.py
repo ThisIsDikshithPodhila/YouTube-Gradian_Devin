@@ -24,6 +24,7 @@ class RequestType(StrEnum):
     UNBLOCK_SITE = "UNBLOCK_SITE"
     CONTENT_REVIEW = "CONTENT_REVIEW"
     VIDEO_REVIEW = "VIDEO_REVIEW"
+    SOS = "SOS"
 
 
 class Request(TimestampMixin, Base):
@@ -50,6 +51,7 @@ class Request(TimestampMixin, Base):
     content_app_ref: Mapped[str | None] = mapped_column(String(200))
     content_fingerprint: Mapped[str | None] = mapped_column(String(64))
     content_review: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    video_rules_fingerprint: Mapped[str | None] = mapped_column(String(64))
 
 
 class ContentApproval(TimestampMixin, Base):

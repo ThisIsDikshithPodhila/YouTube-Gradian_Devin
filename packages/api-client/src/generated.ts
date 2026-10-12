@@ -423,6 +423,55 @@ export const openApiDocument = {
         "title": "DeviceHeartbeatIn",
         "type": "object"
       },
+      "DeviceVideoSettingsOut": {
+        "properties": {
+          "age_band": {
+            "title": "Age Band",
+            "type": "string"
+          },
+          "autoplay_next": {
+            "title": "Autoplay Next",
+            "type": "boolean"
+          },
+          "hide_comments": {
+            "title": "Hide Comments",
+            "type": "boolean"
+          },
+          "hide_shorts": {
+            "title": "Hide Shorts",
+            "type": "boolean"
+          },
+          "learning_only": {
+            "title": "Learning Only",
+            "type": "boolean"
+          },
+          "learning_topics": {
+            "items": {
+              "$ref": "#/components/schemas/LearningTopic"
+            },
+            "title": "Learning Topics",
+            "type": "array"
+          },
+          "picks": {
+            "items": {
+              "$ref": "#/components/schemas/VideoPick"
+            },
+            "title": "Picks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "age_band",
+          "learning_topics",
+          "picks",
+          "learning_only",
+          "hide_shorts",
+          "hide_comments",
+          "autoplay_next"
+        ],
+        "title": "DeviceVideoSettingsOut",
+        "type": "object"
+      },
       "EventBatchIn": {
         "properties": {
           "events": {
@@ -495,6 +544,28 @@ export const openApiDocument = {
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "LearningTopic": {
+        "properties": {
+          "keywords": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Keywords",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "keywords"
+        ],
+        "title": "LearningTopic",
         "type": "object"
       },
       "LoginIn": {
@@ -1574,6 +1645,35 @@ export const openApiDocument = {
         "title": "SignupIn",
         "type": "object"
       },
+      "SosIn": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "SCARY_CONTENT",
+              "NEED_HELP"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "video_id": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9_-]{11}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Id"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "SosIn",
+        "type": "object"
+      },
       "TokenConfirmIn": {
         "properties": {
           "token": {
@@ -1822,11 +1922,59 @@ export const openApiDocument = {
         "title": "VideoCheckOut",
         "type": "object"
       },
+      "VideoPick": {
+        "properties": {
+          "channel": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "video_id": {
+            "pattern": "^[A-Za-z0-9_-]{11}$",
+            "title": "Video Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "video_id"
+        ],
+        "title": "VideoPick",
+        "type": "object"
+      },
       "VideoRulesOut": {
         "properties": {
           "age_band": {
             "title": "Age Band",
             "type": "string"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/VideoSettingsOut"
+          },
+          "suggested_learning_topics": {
+            "items": {
+              "$ref": "#/components/schemas/LearningTopic"
+            },
+            "title": "Suggested Learning Topics",
+            "type": "array"
           },
           "topics": {
             "items": {
@@ -1838,9 +1986,144 @@ export const openApiDocument = {
         },
         "required": [
           "age_band",
-          "topics"
+          "topics",
+          "suggested_learning_topics",
+          "settings"
         ],
         "title": "VideoRulesOut",
+        "type": "object"
+      },
+      "VideoSettingsBody": {
+        "properties": {
+          "autoplay_next": {
+            "default": false,
+            "title": "Autoplay Next",
+            "type": "boolean"
+          },
+          "blocked_channels": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Blocked Channels",
+            "type": "array"
+          },
+          "hide_comments": {
+            "default": true,
+            "title": "Hide Comments",
+            "type": "boolean"
+          },
+          "hide_shorts": {
+            "default": true,
+            "title": "Hide Shorts",
+            "type": "boolean"
+          },
+          "learning_only": {
+            "default": false,
+            "title": "Learning Only",
+            "type": "boolean"
+          },
+          "learning_topics": {
+            "items": {
+              "$ref": "#/components/schemas/LearningTopic"
+            },
+            "maxItems": 30,
+            "title": "Learning Topics",
+            "type": "array"
+          },
+          "picks": {
+            "items": {
+              "$ref": "#/components/schemas/VideoPick"
+            },
+            "maxItems": 100,
+            "title": "Picks",
+            "type": "array"
+          },
+          "trusted_channels": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Trusted Channels",
+            "type": "array"
+          },
+          "youtube_guardian_only": {
+            "default": false,
+            "title": "Youtube Guardian Only",
+            "type": "boolean"
+          }
+        },
+        "title": "VideoSettingsBody",
+        "type": "object"
+      },
+      "VideoSettingsOut": {
+        "properties": {
+          "autoplay_next": {
+            "default": false,
+            "title": "Autoplay Next",
+            "type": "boolean"
+          },
+          "blocked_channels": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Blocked Channels",
+            "type": "array"
+          },
+          "hide_comments": {
+            "default": true,
+            "title": "Hide Comments",
+            "type": "boolean"
+          },
+          "hide_shorts": {
+            "default": true,
+            "title": "Hide Shorts",
+            "type": "boolean"
+          },
+          "learning_only": {
+            "default": false,
+            "title": "Learning Only",
+            "type": "boolean"
+          },
+          "learning_topics": {
+            "items": {
+              "$ref": "#/components/schemas/LearningTopic"
+            },
+            "maxItems": 30,
+            "title": "Learning Topics",
+            "type": "array"
+          },
+          "picks": {
+            "items": {
+              "$ref": "#/components/schemas/VideoPick"
+            },
+            "maxItems": 100,
+            "title": "Picks",
+            "type": "array"
+          },
+          "rules_revision": {
+            "title": "Rules Revision",
+            "type": "integer"
+          },
+          "trusted_channels": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Trusted Channels",
+            "type": "array"
+          },
+          "youtube_guardian_only": {
+            "default": false,
+            "title": "Youtube Guardian Only",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rules_revision"
+        ],
+        "title": "VideoSettingsOut",
         "type": "object"
       },
       "VideoTopicOut": {
@@ -2722,6 +3005,72 @@ export const openApiDocument = {
           }
         ],
         "summary": "Device Request"
+      }
+    },
+    "/v1/devices/me/sos": {
+      "post": {
+        "operationId": "send_sos_v1_devices_me_sos_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SosIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Send Sos"
+      }
+    },
+    "/v1/devices/me/video-settings": {
+      "get": {
+        "operationId": "device_video_settings_v1_devices_me_video_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceVideoSettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Device Video Settings"
       }
     },
     "/v1/devices/me/videos/check": {
@@ -3704,6 +4053,71 @@ export const openApiDocument = {
         "summary": "Video Rules"
       }
     },
+    "/v1/families/{family_id}/children/{child_id}/video-settings": {
+      "put": {
+        "operationId": "update_video_settings_v1_families__family_id__children__child_id__video_settings_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "family_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Family Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "child_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Child Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoSettingsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoSettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Update Video Settings"
+      }
+    },
     "/v1/families/{family_id}/devices/{device_id}/revoke": {
       "post": {
         "operationId": "revoke_device_v1_families__family_id__devices__device_id__revoke_post",
@@ -4400,7 +4814,7 @@ export const openApiDocument = {
   }
 } as const;
 
-export type GuardianApiPath = "/account-deletion" | "/health" | "/livez" | "/readiness" | "/readyz" | "/v1/auth/account" | "/v1/auth/login" | "/v1/auth/logout" | "/v1/auth/me" | "/v1/auth/password-reset/confirm" | "/v1/auth/password-reset/request" | "/v1/auth/refresh" | "/v1/auth/signup" | "/v1/auth/verification/confirm" | "/v1/auth/verification/request" | "/v1/devices/me/content-approvals" | "/v1/devices/me/events" | "/v1/devices/me/heartbeat" | "/v1/devices/me/inventory" | "/v1/devices/me/policy" | "/v1/devices/me/policy/ack" | "/v1/devices/me/push-tokens" | "/v1/devices/me/reputation" | "/v1/devices/me/reputation/classify" | "/v1/devices/me/requests" | "/v1/devices/me/requests/{request_id}" | "/v1/devices/me/videos/check" | "/v1/devices/pair" | "/v1/families" | "/v1/families/guardians/accept" | "/v1/families/{family_id}" | "/v1/families/{family_id}/activity" | "/v1/families/{family_id}/activity/usage" | "/v1/families/{family_id}/children" | "/v1/families/{family_id}/children/{child_id}" | "/v1/families/{family_id}/children/{child_id}/inventory" | "/v1/families/{family_id}/children/{child_id}/inventory/{platform_app_id}/review" | "/v1/families/{family_id}/children/{child_id}/pairing" | "/v1/families/{family_id}/children/{child_id}/policy/mutations" | "/v1/families/{family_id}/children/{child_id}/reputation" | "/v1/families/{family_id}/children/{child_id}/video-rules" | "/v1/families/{family_id}/devices/{device_id}/revoke" | "/v1/families/{family_id}/guardians" | "/v1/families/{family_id}/guardians/invite" | "/v1/families/{family_id}/health" | "/v1/families/{family_id}/requests" | "/v1/families/{family_id}/requests/{request_id}/approve" | "/v1/families/{family_id}/requests/{request_id}/deny" | "/v1/families/{family_id}/usage/reports" | "/v1/me/push-tokens" | "/v1/policy/public-key" | "/v1/push/actions/{action_token}/approve" | "/v1/push/actions/{action_token}/deny";
+export type GuardianApiPath = "/account-deletion" | "/health" | "/livez" | "/readiness" | "/readyz" | "/v1/auth/account" | "/v1/auth/login" | "/v1/auth/logout" | "/v1/auth/me" | "/v1/auth/password-reset/confirm" | "/v1/auth/password-reset/request" | "/v1/auth/refresh" | "/v1/auth/signup" | "/v1/auth/verification/confirm" | "/v1/auth/verification/request" | "/v1/devices/me/content-approvals" | "/v1/devices/me/events" | "/v1/devices/me/heartbeat" | "/v1/devices/me/inventory" | "/v1/devices/me/policy" | "/v1/devices/me/policy/ack" | "/v1/devices/me/push-tokens" | "/v1/devices/me/reputation" | "/v1/devices/me/reputation/classify" | "/v1/devices/me/requests" | "/v1/devices/me/requests/{request_id}" | "/v1/devices/me/sos" | "/v1/devices/me/video-settings" | "/v1/devices/me/videos/check" | "/v1/devices/pair" | "/v1/families" | "/v1/families/guardians/accept" | "/v1/families/{family_id}" | "/v1/families/{family_id}/activity" | "/v1/families/{family_id}/activity/usage" | "/v1/families/{family_id}/children" | "/v1/families/{family_id}/children/{child_id}" | "/v1/families/{family_id}/children/{child_id}/inventory" | "/v1/families/{family_id}/children/{child_id}/inventory/{platform_app_id}/review" | "/v1/families/{family_id}/children/{child_id}/pairing" | "/v1/families/{family_id}/children/{child_id}/policy/mutations" | "/v1/families/{family_id}/children/{child_id}/reputation" | "/v1/families/{family_id}/children/{child_id}/video-rules" | "/v1/families/{family_id}/children/{child_id}/video-settings" | "/v1/families/{family_id}/devices/{device_id}/revoke" | "/v1/families/{family_id}/guardians" | "/v1/families/{family_id}/guardians/invite" | "/v1/families/{family_id}/health" | "/v1/families/{family_id}/requests" | "/v1/families/{family_id}/requests/{request_id}/approve" | "/v1/families/{family_id}/requests/{request_id}/deny" | "/v1/families/{family_id}/usage/reports" | "/v1/me/push-tokens" | "/v1/policy/public-key" | "/v1/push/actions/{action_token}/approve" | "/v1/push/actions/{action_token}/deny";
 
 export class GeneratedGuardianError extends Error {
   constructor(message: string, readonly status: number) {

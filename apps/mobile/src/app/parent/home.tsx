@@ -141,6 +141,7 @@ export default function ParentHomeRoute() {
               <PrimaryButton label="Pause child internet" onPress={() => policyMutation.mutate("PAUSE_INTERNET")} />
               <SecondaryButton label="Child detail" onPress={() => router.push({ pathname: "/parent/child-detail", params: { familyId: activeFamilyId, childId: activeChildId } })} />
               <PrimaryButton label="Generate pairing code" onPress={() => router.push({ pathname: "/parent/pairing", params: { familyId: activeFamilyId, childId: activeChildId } })} />
+              <PrimaryButton label="YouTube & learning" onPress={() => router.push({ pathname: "/parent/youtube-learning", params: { familyId: activeFamilyId, childId: activeChildId } })} />
               <SecondaryButton label="Rules" onPress={() => router.push({ pathname: "/parent/rules", params: { familyId: activeFamilyId, childId: activeChildId } })} />
               <SecondaryButton label="Requests" onPress={() => router.push({ pathname: "/parent/requests", params: { familyId: activeFamilyId, childId: activeChildId } })} />
               <SecondaryButton label="Activity" onPress={() => router.push({ pathname: "/parent/activity", params: { familyId: activeFamilyId, childId: activeChildId } })} />

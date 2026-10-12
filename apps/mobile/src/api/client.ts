@@ -61,7 +61,7 @@ export type AccessRequest = {
   id: string;
   child_profile_id: string;
   device_id: string;
-  request_type: "MORE_TIME" | "UNBLOCK_APP" | "UNBLOCK_SITE" | "CONTENT_REVIEW" | "VIDEO_REVIEW";
+  request_type: "MORE_TIME" | "UNBLOCK_APP" | "UNBLOCK_SITE" | "CONTENT_REVIEW" | "VIDEO_REVIEW" | "SOS";
   subject: string | null;
   state: "PENDING" | "APPROVED" | "DENIED" | "EXPIRED" | "CANCELLED";
   reason: string | null;
@@ -77,9 +77,34 @@ export type VideoCheck = {
   topic: string | null;
   request_id: string | null;
 };
+export type LearningTopic = { label: string; keywords: string };
+export type VideoPick = { video_id: string; title?: string | null; channel?: string | null };
+export type VideoSettingsInput = {
+  trusted_channels: string[];
+  blocked_channels: string[];
+  learning_topics: LearningTopic[];
+  picks: VideoPick[];
+  learning_only: boolean;
+  hide_shorts: boolean;
+  hide_comments: boolean;
+  autoplay_next: boolean;
+  youtube_guardian_only: boolean;
+};
+export type VideoSettings = VideoSettingsInput & { rules_revision: number };
 export type VideoRules = {
   age_band: string;
   topics: Array<{ code: string; label: string; keywords: string[] }>;
+  suggested_learning_topics: LearningTopic[];
+  settings: VideoSettings;
+};
+export type DeviceVideoSettings = {
+  age_band: string;
+  learning_topics: LearningTopic[];
+  picks: VideoPick[];
+  learning_only: boolean;
+  hide_shorts: boolean;
+  hide_comments: boolean;
+  autoplay_next: boolean;
 };
 export type ContentReviewRequestInput = {
   request_type: "CONTENT_REVIEW";
@@ -510,6 +535,21 @@ export class GuardianApiClient {
   }
   videoRules(familyId: string, childId: string) {
     return this.request<VideoRules>(`/v1/families/${familyId}/children/${childId}/video-rules`);
+  }
+  updateVideoSettings(familyId: string, childId: string, settings: VideoSettingsInput) {
+    return this.request<VideoSettings>(`/v1/families/${familyId}/children/${childId}/video-settings`, {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    });
+  }
+  deviceVideoSettings() {
+    return this.request<DeviceVideoSettings>("/v1/devices/me/video-settings");
+  }
+  sendSos(kind: "SCARY_CONTENT" | "NEED_HELP", videoId?: string | null) {
+    return this.request<AccessRequest>("/v1/devices/me/sos", {
+      method: "POST",
+      body: JSON.stringify(videoId ? { kind, video_id: videoId } : { kind }),
+    });
   }
   contentApprovals() {
     return this.request<ContentApproval[]>("/v1/devices/me/content-approvals");
