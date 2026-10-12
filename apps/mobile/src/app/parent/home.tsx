@@ -38,7 +38,7 @@ export default function ParentHomeRoute() {
     queryFn: () => api.children(activeFamilyId!),
     enabled: Boolean(activeFamilyId),
   });
-  const activeChildId = resolveActiveChildId(storedChildId, routeChildId, children.data?.[0]?.id);
+  const activeChildId = resolveActiveChildId(storedChildId, routeChildId, children.data?.[0]?.id, children.data?.map((child) => child.id));
   const health = useQuery({
     queryKey: ["health", activeFamilyId, activeChildId],
     queryFn: () => api.health(activeFamilyId!, activeChildId),
@@ -105,6 +105,11 @@ export default function ParentHomeRoute() {
           <PrimaryButton label="Set up your family" onPress={() => router.push("/parent/setup")} />
         </SectionSurface>
       ) : null}
+      {activeFamilyId ? (
+        <SectionSurface>
+          <PrimaryButton label="Add a child" onPress={() => router.push({ pathname: "/parent/setup", params: { familyId: activeFamilyId } })} />
+        </SectionSurface>
+      ) : null}
       <DataState state={state} onRetry={() => { void children.refetch(); void health.refetch(); void inventory.refetch(); }}>
         <SectionSurface>
           <Text>Children</Text>
@@ -119,10 +124,6 @@ export default function ParentHomeRoute() {
               }}
             />
           ))}
-          <PrimaryButton
-            label="Add a child"
-            onPress={() => router.push({ pathname: "/parent/setup", params: { familyId: activeFamilyId } })}
-          />
         </SectionSurface>
         {selectedChild ? (
           <ResponsiveColumns>

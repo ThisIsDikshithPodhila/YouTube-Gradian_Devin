@@ -14,11 +14,17 @@ def releaseStoreType = releaseValue("GUARDIAN_RELEASE_STORE_TYPE") ?: "JKS"
 def releaseCertificateDigest = releaseValue("GUARDIAN_RELEASE_CERT_SHA256").replace(":", "").toLowerCase()
 def releaseVersionCodeValue = releaseValue("GUARDIAN_RELEASE_VERSION_CODE")
 def guardianRole = (findProperty("guardianRole") ?: "").toString()
+def limitedChildRelease = releaseValue("GUARDIAN_RELEASE_LIMITED_CHILD") == "true"
 if (guardianRole && !(guardianRole in ["parent", "child"])) {
     throw new GradleException("guardianRole must be parent or child.")
 }
 if (guardianRole && releaseValue("EXPO_PUBLIC_GUARDIAN_ROLE") != guardianRole) {
     throw new GradleException("EXPO_PUBLIC_GUARDIAN_ROLE must match guardianRole.")
+}
+if (!(releaseValue("GUARDIAN_RELEASE_LIMITED_CHILD") in ["", "true", "false"]) ||
+    limitedChildRelease != (releaseValue("EXPO_PUBLIC_GUARDIAN_LIMITED_CHILD") == "true") ||
+    (limitedChildRelease && guardianRole != "child")) {
+    throw new GradleException("Limited Child release requires guardianRole=child and matching GUARDIAN_RELEASE_LIMITED_CHILD and EXPO_PUBLIC_GUARDIAN_LIMITED_CHILD values.")
 }
 
 def releaseAdmissionEnvironment = [
@@ -34,6 +40,7 @@ def releaseAdmissionEnvironment = [
     "GUARDIAN_POLICY_KEY_ID",
     "GUARDIAN_RELEASE_VERSION_CODE",
     "GUARDIAN_ENABLE_TEST_FIXTURES",
+    "GUARDIAN_RELEASE_LIMITED_CHILD",
 ].collectEntries { name -> [name, name == "GUARDIAN_RELEASE_STORE_FILE" && releaseStoreFileValue ? file(releaseStoreFileValue).absolutePath : releaseValue(name)] }
 
 configurations {
@@ -160,9 +167,16 @@ android {
         targetSdkVersion 36
         versionCode 1
         versionName "1.0.0"
-        resValue "string", "guardian_app_name", guardianRole ? "Guardian ${guardianRole.capitalize()}" : "Guardian"
+        resValue "string", "guardian_app_name", limitedChildRelease ? "Guardian Child Web" : guardianRole ? "Guardian ${guardianRole.capitalize()}" : "Guardian"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+    }
+    sourceSets {
+        if (guardianRole == "parent") {
+            release.manifest.srcFile "src/parent/AndroidManifest.xml"
+        } else if (limitedChildRelease) {
+            release.manifest.srcFile "src/limited/AndroidManifest.xml"
+        }
     }
     signingConfigs {
         debug {

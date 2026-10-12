@@ -2,10 +2,11 @@ export function resolveActiveChildId(
   storedChildId: string | null,
   routeChildId: string | undefined,
   fallbackChildId: string | undefined,
+  availableChildIds?: string[],
 ) {
-  // A route can be stale after the parent switches children. The durable
-  // explicit selection is the single source of truth once it exists.
-  return storedChildId ?? routeChildId ?? fallbackChildId;
+  const available = (childId: string | null | undefined) =>
+    childId && (!availableChildIds || availableChildIds.includes(childId)) ? childId : null;
+  return available(storedChildId) ?? available(routeChildId) ?? available(fallbackChildId) ?? undefined;
 }
 
 type ParentHomeRoute = {

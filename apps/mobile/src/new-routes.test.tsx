@@ -21,6 +21,18 @@ jest.mock("expo-router", () => ({
   useRouter: () => ({ push: mockPush }),
 }));
 
+jest.mock("@/auth/session", () => ({
+  useSession: () => ({
+    familyId: "family-1",
+    childId: null,
+    setChildId: jest.fn(),
+    signOut: jest.fn(),
+    sessionError: null,
+  }),
+}));
+
+jest.mock("@/state/network", () => ({ useNetworkStatus: () => ({ isOffline: false }) }));
+
 jest.mock("@/api/client", () => ({
   api: {
     child: jest.fn(),
@@ -62,6 +74,7 @@ jest.mock("@tanstack/react-query", () => ({
 }));
 
 import ActivityDetailRoute from "@/app/parent/activity-detail";
+import ParentHomeRoute from "@/app/parent/home";
 import ChildDetailRoute from "@/app/parent/child-detail";
 import FamilySettingsRoute from "@/app/parent/family-settings";
 import GuardianDeviceSettingsRoute from "@/app/parent/guardian-device-settings";
@@ -141,6 +154,14 @@ function setLoadedQueries() {
     },
   });
 }
+
+test("Parent can add a child when its family has no child profiles", () => {
+  setQuery(["children", "family-1"], { data: [] });
+  const screen = render(<ParentHomeRoute />);
+  expect(screen.getByText("Nothing to show yet.")).toBeTruthy();
+  fireEvent.press(screen.getByLabelText("Add a child"));
+  expect(mockPush).toHaveBeenCalledWith({ pathname: "/parent/setup", params: { familyId: "family-1" } });
+});
 
 test("new parent and child routes render loaded data", () => {
   setLoadedQueries();

@@ -22,6 +22,7 @@ type ActiveGrantDescriptor = {
 };
 
 export default function ChildTimeRoute() {
+  const limitedChildBuild = process.env.EXPO_PUBLIC_GUARDIAN_LIMITED_CHILD === "true";
   const router = useRouter();
   const usage = useQuery({
     queryKey: ["child-usage"],
@@ -119,6 +120,9 @@ export default function ChildTimeRoute() {
   return (
     <ScreenScaffold title="My time">
       <SectionSurface>
+        {limitedChildBuild ? (
+          <Text>App time and limits are informational in this web-only test build; app blocking is unavailable.</Text>
+        ) : null}
         <Text>Time used today</Text>
         {usage.data ? <Text>{Math.round(deviceUsedSeconds / 60)} minutes recorded on this device.</Text> : <Text>Unknown · Usage Access is unavailable or has not reported yet.</Text>}
         {usage.data && appBudgets.length > 0
@@ -143,15 +147,15 @@ export default function ChildTimeRoute() {
                 : remainingSeconds < 60
                   ? "Less than 1 minute remaining."
                   : `${Math.floor(remainingSeconds / 60)} minutes remaining.`;
-              return <Text key={budget.app_ref}>{budget.app_ref}: {remainingLabel}</Text>;
+              return <Text key={budget.app_ref}>{budget.app_ref}: {remainingLabel}{limitedChildBuild ? " (not enforced)" : ""}</Text>;
             })
           : null}
         {activeGrantDescriptors.map((grant) => (
           <Text key={grant.ruleId}>Parent-approved extra time for {grant.target}{grant.minutes === null ? "." : `: ${grant.minutes} minutes.`}</Text>
         ))}
-        <Text>Need a change? Ask a parent for more time or to unblock an app or website.</Text>
+        <Text>{limitedChildBuild ? "Need a website unblocked? Ask a parent." : "Need a change? Ask a parent for more time or to unblock an app or website."}</Text>
         <PrimaryButton label="Ask for help" onPress={() => router.push("/child/requests")} />
-        <PrimaryButton label="Open time-up help" onPress={() => router.push("/child/time-up")} />
+        {!limitedChildBuild ? <PrimaryButton label="Open time-up help" onPress={() => router.push("/child/time-up")} /> : null}
       </SectionSurface>
     </ScreenScaffold>
   );

@@ -170,6 +170,19 @@ signing configuration above. For a local role build, set
 `EXPO_PUBLIC_GUARDIAN_ROLE=parent` and pass `-PguardianRole=parent` to Gradle
 (use `child` for the child app). The unqualified build retains the original
 single-app role selection and `com.guardian.family` package for development.
+Parent release APKs omit Child-only monitoring, VPN, Accessibility, and
+notification-listener declarations. Parent protection health displays the
+paired Child device's reported state; permissions are granted on that device.
+
+For a temporary web-only Child APK, use the same release configuration and
+Child role, and add `GUARDIAN_RELEASE_LIMITED_CHILD=true` and
+`EXPO_PUBLIC_GUARDIAN_LIMITED_CHILD=true` to the build environment. The APK
+keeps the Child package and signing identity so it can update an installed
+Child release, but omits Accessibility and notification-listener services.
+VPN website protection, pairing, and policy sync remain. App-limit enforcement,
+Accessibility content inspection, and notification-based safety are unavailable;
+the Child app reports this explicitly. This build is for testing and does not
+guarantee acceptance by Google Play Protect on a physical phone.
 
 ## Emulator harness
 

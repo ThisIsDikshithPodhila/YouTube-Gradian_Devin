@@ -84,6 +84,17 @@ class GuardianProtectionModule : Module() {
       reportCapabilityChanges(capabilities.getCapabilities())
     }
 
+    OnActivityResult { _, payload ->
+      if (payload.requestCode != CapabilityDetector.VPN_CONSENT_REQUEST_CODE) return@OnActivityResult
+      val context = appContext.reactContext ?: return@OnActivityResult
+      if (payload.resultCode == android.app.Activity.RESULT_OK &&
+        GuardianVpnService.startWithUserInitiatedPolicy(context)
+      ) {
+        GuardianVpnPreferences.clearEnableRequested(context)
+      }
+      reportCapabilityChanges(capabilities.getCapabilities())
+    }
+
     AsyncFunction("getCapabilities") {
       reportCapabilityChanges(capabilities.getCapabilities())
     }
@@ -95,7 +106,7 @@ class GuardianProtectionModule : Module() {
     }
     AsyncFunction("requestVpnPermission") {
       appContext.reactContext?.let { GuardianVpnPreferences.recordEnableRequested(it) }
-      val result = capabilities.requestVpnPermission()
+      val result = capabilities.requestVpnPermission(appContext.currentActivity)
       appContext.reactContext?.let { context ->
         if (result["granted"] == true) {
           if (GuardianVpnService.startWithUserInitiatedPolicy(context)) {

@@ -1,0 +1,19 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+  <uses-permission android:name="android.permission.CAMERA" tools:node="remove" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" tools:node="remove" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove" />
+  <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:node="remove" />
+  <application>
+    <meta-data android:name="com.guardian.family.PARENT_CONTROLLER" android:value="true" />
+    <meta-data android:name="isMonitoringTool" tools:node="remove" />
+    <meta-data android:name="com.guardian.family.CHILD_MONITORING_DISCLOSURE" tools:node="remove" />
+    <meta-data android:name="com.guardian.family.ACCESSIBILITY_DECLARATION" tools:node="remove" />
+    <meta-data android:name="com.guardian.family.VPN_DECLARATION" tools:node="remove" />
+    <receiver android:name="expo.modules.guardianprotection.vpn.GuardianBootReceiver" tools:node="remove" />
+    <service android:name="expo.modules.guardianprotection.vpn.GuardianVpnService" tools:node="remove" />
+    <activity android:name="expo.modules.guardianprotection.accessibility.GuardianBlockActivity" tools:node="remove" />
+    <service android:name="expo.modules.guardianprotection.accessibility.GuardianAccessibilityService" tools:node="remove" />
+    <service android:name="expo.modules.guardianprotection.communication.GuardianNotificationListenerService" tools:node="remove" />
+  </application>
+</manifest>

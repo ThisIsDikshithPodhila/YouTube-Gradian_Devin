@@ -169,6 +169,16 @@ export function validateReleaseAdmission(environment = process.env) {
   ) {
     errors.push("Release admission forbids fixture code.");
   }
+  const limitedChild = value(environment, "GUARDIAN_RELEASE_LIMITED_CHILD");
+  if (!["", "true", "false"].includes(limitedChild)) {
+    errors.push("GUARDIAN_RELEASE_LIMITED_CHILD must be true or false.");
+  }
+  if (limitedChild === "true" && (
+    value(environment, "EXPO_PUBLIC_GUARDIAN_ROLE") !== "child" ||
+    value(environment, "EXPO_PUBLIC_GUARDIAN_LIMITED_CHILD") !== "true"
+  )) {
+    errors.push("Limited Child release requires matching Child role and app capability settings.");
+  }
   return errors;
 }
 
